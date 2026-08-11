@@ -23,5 +23,5 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Run lint, build, and Fake Runner tests
+      - name: Run privacy scan, lint, build, and Fake Runner tests
         run: npm run test:ci

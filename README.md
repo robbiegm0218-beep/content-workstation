@@ -69,6 +69,8 @@ npm test
 
 GitHub Actions 运行 `npm run test:ci`，其中 Bridge 集成测试使用 Fake Runner，不要求安装或登录 Codex，也不会消耗 Codex 额度。
 
+CI 会先运行 `npm run check:privacy`，检查所有 Git 跟踪文件是否包含真实密钥、认证文件、`.data/work/outputs` 本机数据或用户目录绝对路径。提交前也可以单独运行这条命令。
+
 需要在本机验证真实 Codex 时，必须明确选择范围并添加 `--yes`：
 
 ```bash
