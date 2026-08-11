@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "manifestVersion": { "type": "string" },
+    "skillEvidence": { "type": "string" },
+    "taskType": { "type": "string", "enum": ["html", "cover", "publishing"] },
+    "generationMode": {
+      "type": "string",
+      "enum": ["codex-html", "codex-imagegen-hybrid", "codex-template-render", "codex-publishing"]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["recording-html", "cover-16x9", "cover-4x3", "cover-3x4", "publishing-package"] },
+          "path": { "type": "string" },
+          "mimeType": { "type": "string" },
+          "width": { "type": ["integer", "null"] },
+          "height": { "type": ["integer", "null"] },
+          "sha256": { "type": "string" }
+        },
+        "required": ["id", "type", "path", "mimeType", "width", "height", "sha256"]
+      }
+    },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["manifestVersion", "skillEvidence", "taskType", "generationMode", "artifacts", "notes"]
+}

@@ -30,23 +30,40 @@ test("server-renders the content workstation", async () => {
   assert.doesNotMatch(html, /AI 产品还要不要写 PRD/);
 });
 
-test("keeps content, HTML, and cover production as separate stages", async () => {
-  const [page, css] = await Promise.all([
+test("keeps content, HTML, cover, and publishing production as separate stages", async () => {
+  const [page, css, bridgeClient] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/local-bridge.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /【本次只做内容】/);
-  assert.match(page, /不生成 HTML 页面，不生成封面图/);
+  assert.match(page, /使用 Codex 生成内容/);
+  assert.match(page, /完成后会自动回填/);
+  assert.match(page, /ContentGenerationPanel/);
+  assert.match(page, /contentVersions/);
+  assert.match(page, /采用这个版本/);
   assert.match(page, /确认内容，进入视觉制作/);
-  assert.match(page, /function htmlTaskPromptFor/);
-  assert.match(page, /function coverTaskPromptFor/);
   assert.match(page, /const htmlStyles/);
   assert.match(page, /const coverStyles/);
-  assert.match(page, /生成 HTML 任务指令/);
-  assert.match(page, /生成封面任务指令/);
+  assert.match(page, /高冲击人物科技/);
+  assert.match(page, /无本人照片时自动改用焦点物体/);
+  assert.match(page, /approved-creator-asset-only/);
+  assert.match(page, /function VisualGenerationPanel/);
+  assert.match(page, /function ArtifactPreview/);
+  assert.match(page, /接受这版产物/);
+  assert.match(page, /publishingPackageLabel/);
+  assert.match(page, /function missingPublishingAssets/);
+  assert.match(page, /item\.htmlStyle === style/);
+  assert.match(page, /item\.coverStyle === style/);
+  assert.match(page, /查看解锁条件/);
+  assert.match(page, /run-activity/);
+  assert.match(page, /function BundleExportPanel/);
+  assert.match(page, /下载 ZIP/);
+  assert.match(page, /下载发布包 Markdown/);
+  assert.match(page, /继续修改/);
+  assert.match(page, /continueProductionRun/);
+  assert.match(page, /模板降级/);
   assert.match(page, /function InlineCreationWorkflow/);
-  assert.match(page, /生成后直接回到本页粘贴、编辑和确认/);
   assert.match(page, /const priorityContent = useMemo/);
   assert.match(page, /productionStagesFor\(priorityContent\)/);
   assert.match(page, /真实制作节点/);
@@ -66,4 +83,17 @@ test("keeps content, HTML, and cover production as separate stages", async () =>
   assert.match(css, /\.style-grid/);
   assert.match(css, /\.production-lock/);
   assert.match(css, /\.detail-panel \.secondary-button/);
+  assert.match(css, /\.generation-panel/);
+  assert.match(css, /\.bridge-chip/);
+  assert.match(css, /\.visual-generation/);
+  assert.match(css, /\.cover-artifact-grid/);
+  assert.match(css, /\.publishing-artifact-preview/);
+  assert.match(bridgeClient, /\/v1\/session/);
+  assert.match(bridgeClient, /createContentRun/);
+  assert.match(bridgeClient, /getContentResult/);
+  assert.match(bridgeClient, /createVisualRun/);
+  assert.match(bridgeClient, /continueBridgeRun/);
+  assert.match(bridgeClient, /getArtifactManifest/);
+  assert.match(bridgeClient, /getArtifactBlob/);
+  assert.match(bridgeClient, /getContentBundle/);
 });

@@ -1,0 +1,17 @@
+{
+  "styleId": "dark-industrial-flow",
+  "styleName": "深色工业数据流",
+  "tone": "理性、专业、有技术现场感",
+  "colors": {
+    "background": "#07111F",
+    "surface": "#10233A",
+    "primary": "#55E6C1",
+    "accent": "#FFB84D",
+    "text": "#F5F7FA",
+    "muted": "#9FB2C8"
+  },
+  "visualLanguage": ["数据流水线", "质量关卡", "节点连线", "轻微网格"],
+  "coverEyebrow": "AI 产品实战",
+  "coverTitle": "RAG 后台完整链路",
+  "constraints": ["瀑布流小图标题清楚", "不要人物肖像", "不要复杂装饰", "三个比例独立排版"]
+}

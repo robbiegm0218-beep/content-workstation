@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "generationMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skillName": { "type": "string" },
+        "skillEvidence": { "type": "string" },
+        "researchUsed": { "type": "boolean" }
+      },
+      "required": ["skillName", "skillEvidence", "researchUsed"]
+    },
+    "recommendedSubtitle": { "type": "string" },
+    "subtitleCandidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string" },
+          "angle": { "type": "string" },
+          "rationale": { "type": "string" }
+        },
+        "required": ["title", "angle", "rationale"]
+      }
+    },
+    "audiencePain": { "type": "array", "items": { "type": "string" } },
+    "coreConflict": { "type": "string" },
+    "coreThesis": { "type": "string" },
+    "script": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opening": { "type": "string" },
+        "body": { "type": "string" },
+        "closing": { "type": "string" },
+        "fullMarkdown": { "type": "string" }
+      },
+      "required": ["opening", "body", "closing", "fullMarkdown"]
+    },
+    "timeline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "startSeconds": { "type": "integer" },
+          "endSeconds": { "type": "integer" },
+          "section": { "type": "string" },
+          "picture": { "type": "string" },
+          "narrationSummary": { "type": "string" },
+          "transitionPurpose": { "type": "string" }
+        },
+        "required": ["startSeconds", "endSeconds", "section", "picture", "narrationSummary", "transitionPurpose"]
+      }
+    },
+    "materialSuggestions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "timing": { "type": "string" },
+          "material": { "type": "string" },
+          "purpose": { "type": "string" },
+          "sourceNote": { "type": "string" }
+        },
+        "required": ["timing", "material", "purpose", "sourceNote"]
+      }
+    },
+    "platformPackages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bilibili": { "$ref": "#/$defs/platformPackage" },
+        "xiaohongshu": { "$ref": "#/$defs/platformPackage" },
+        "wechatChannels": { "$ref": "#/$defs/platformPackage" },
+        "douyin": { "$ref": "#/$defs/platformPackage" }
+      },
+      "required": ["bilibili", "xiaohongshu", "wechatChannels", "douyin"]
+    },
+    "missingCaseQuestions": { "type": "array", "items": { "type": "string" } },
+    "structureRationale": { "type": "string" }
+  },
+  "required": [
+    "generationMeta",
+    "recommendedSubtitle",
+    "subtitleCandidates",
+    "audiencePain",
+    "coreConflict",
+    "coreThesis",
+    "script",
+    "timeline",
+    "materialSuggestions",
+    "platformPackages",
+    "missingCaseQuestions",
+    "structureRationale"
+  ],
+  "$defs": {
+    "platformPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "pinnedCommentQuestion": { "type": "string" }
+      },
+      "required": ["title", "description", "tags", "pinnedCommentQuestion"]
+    }
+  }
+}

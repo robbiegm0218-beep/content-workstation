@@ -1,0 +1,10 @@
+{
+  "mainTitle": "RAG 后台的流转：从数据接入到评测上线的完整链路",
+  "whyNow": "同类内容常停留在概念介绍，需要补充产品经理在真实链路中的判断方式",
+  "coreThesis": "RAG 后台不是 API 堆砌，而是一条有先后顺序、有质量关卡的数据流水线",
+  "durationMinutes": 5,
+  "recordingMode": "混合录制",
+  "recordingStructure": "出镜开场 20–30 秒、HTML 录屏主体、出镜总结 20–30 秒",
+  "platforms": ["B站", "小红书", "视频号", "抖音"],
+  "researchAllowed": false
+}

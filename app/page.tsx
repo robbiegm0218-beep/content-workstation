@@ -1,6 +1,23 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import {
+  cancelBridgeRun,
+  connectLocalBridge,
+  continueBridgeRun,
+  createContentRun,
+  createVisualRun,
+  getArtifactBlob,
+  getArtifactManifest,
+  getBridgeRun,
+  getContentBundle,
+  getContentResult,
+  getWorkstationState,
+  listBridgeRuns,
+  saveWorkstationState,
+} from "./lib/local-bridge";
+import type { ArtifactManifest, BridgeRun, BridgeRunStatus } from "./lib/local-bridge";
 
 type View = "dashboard" | "create" | "library" | "cases" | "review" | "settings";
 type ContentStatus = "选题草稿" | "待生成" | "已生成" | "待录制" | "已录制" | "已发布" | "已复盘";
@@ -9,8 +26,20 @@ type RecordingMode = "出镜口播" | "HTML录屏" | "混合录制" | "未设置
 type DraftState = "未生成" | "编辑中" | "已确认";
 type AssetState = "未开始" | "待生成" | "已生成";
 type HtmlStyle = "专业科技" | "极简信息图" | "杂志卡片" | "白板讲解";
-type CoverStyle = "高对比科技" | "大字观点" | "杂志编辑" | "人物留白";
+type CoverStyle = "高对比科技" | "大字观点" | "杂志编辑" | "人物留白" | "高冲击人物科技";
 type ContentOrigin = "工作站创作" | "历史归档";
+type ContentVersionState = "候选" | "已采用";
+
+type ContentVersion = {
+  version: number;
+  runId: string;
+  createdAt: string;
+  subtitle: string;
+  pain: string;
+  viewpoint: string;
+  script: string;
+  state: ContentVersionState;
+};
 
 type Metric = {
   platform: Platform;
@@ -41,6 +70,7 @@ type ContentItem = {
   draftState: DraftState;
   htmlState: AssetState;
   coverState: AssetState;
+  publishingState: AssetState;
   htmlStyle: HtmlStyle;
   coverStyle: CoverStyle;
   metrics: Metric[];
@@ -48,6 +78,23 @@ type ContentItem = {
   publishedAt: string;
   publishLinks: Partial<Record<Platform, string>>;
   archiveNotes: string;
+  contentVersion: number;
+  acceptedRunId: string;
+  latestRunId: string;
+  latestRunStatus: BridgeRunStatus | "idle";
+  contentVersions: ContentVersion[];
+  htmlRunId: string;
+  coverRunId: string;
+  pendingHtmlRunId: string;
+  pendingCoverRunId: string;
+  htmlManifest: ArtifactManifest | null;
+  coverManifest: ArtifactManifest | null;
+  pendingHtmlManifest: ArtifactManifest | null;
+  pendingCoverManifest: ArtifactManifest | null;
+  publishingRunId: string;
+  pendingPublishingRunId: string;
+  publishingManifest: ArtifactManifest | null;
+  pendingPublishingManifest: ArtifactManifest | null;
 };
 
 type CaseItem = {
@@ -124,11 +171,16 @@ const htmlStyles: Record<HtmlStyle, { mark: string; description: string }> = {
   杂志卡片: { mark: "刊", description: "强调版式节奏，适合观点、对比与案例叙事。" },
   白板讲解: { mark: "板", description: "手绘箭头与便签感，适合接地气的拆解教学。" },
 };
-const coverStyles: Record<CoverStyle, { mark: string; description: string }> = {
+const coverStyles: Record<CoverStyle, { mark: string; description: string; guidance?: string }> = {
   高对比科技: { mark: "亮", description: "深底亮色，适合 AI、系统与技术实战。" },
   大字观点: { mark: "字", description: "文字占主视觉，适合冲突判断和强结论。" },
   杂志编辑: { mark: "刊", description: "克制、有质感，适合长期专业账号。" },
   人物留白: { mark: "人", description: "预留人物位置，适合出镜账号增强识别度。" },
+  高冲击人物科技: {
+    mark: "冲",
+    description: "超短大标题＋本人形象＋话题物件；无本人照片时自动改用焦点物体。",
+    guidance: "使用超短大标题、强明暗对比和一个高饱和强调色。仅在提供并明确授权创作者本人照片时使用人物抠图、轮廓光和自然手势；没有本人照片时不得生成随机人物，改用产品图标、界面局部或关键物件作为主体。装饰元素控制在 1～2 个，不模仿参考博主的脸、文案、品牌或固定版式。",
+  },
 };
 const recordingModeCopy: Record<Exclude<RecordingMode, "未设置">, { icon: string; title: string; description: string; bestFor: string }> = {
   出镜口播: { icon: "人", title: "出镜口播", description: "以真人表达为主，穿插素材和字幕。", bestFor: "职业观点、个人经历、判断冲突" },
@@ -140,111 +192,33 @@ const outputsByMode: Record<Exclude<RecordingMode, "未设置">, string[]> = {
   HTML录屏: ["录屏版口播稿", "静态 HTML 演示页", "页面与演讲稿映射", "页面切换提示", "四平台发布包", "三尺寸封面图"],
   混合录制: ["出镜开场与总结稿", "录屏主体口播稿", "静态 HTML 演示页", "出镜与录屏切换时间轴", "素材插入清单", "四平台发布包", "三尺寸封面图"],
 };
-const recordingGuidance: Record<Exclude<RecordingMode, "未设置">, string> = {
-  出镜口播: "以出镜表达为主。稿件按提词器可读性分段，标出停顿、重音、字幕和补充素材插入点，避免连续照稿朗读。",
-  HTML录屏: "以静态 HTML 页面录屏为主。页面从上至下与口播严格对应，页面标题用于观看而非全部朗读，并标明滚动、停留和切屏位置。",
-  混合录制: "采用出镜开场 20～30 秒、HTML 录屏主体、出镜总结 20～30 秒的结构；标明每次切换的时间点、画面、口播和转场目的。",
-};
-
 function productionPlanFor(mode: Exclude<RecordingMode, "未设置">) {
   if (mode === "出镜口播") return "出镜开场 → 观点与案例口播 → 穿插素材/B-roll → 出镜总结与 CTA";
   if (mode === "HTML录屏") return "问题页 → 核心判断页 → 方法/案例页 → 行动清单页；按页面顺序完成录屏与旁白";
   return "出镜开场 20～30 秒 → HTML 主体 4～6 分钟 → 必要时切回出镜强调经历 → 出镜总结 20～30 秒";
 }
 
-function contentTaskPromptForItem(item: ContentItem, settings: Settings) {
-  return `请使用 product-manager-content-creator Skill，先完成这期视频的“内容草稿”。
-
-【本次只做内容】
-- 不生成 HTML 页面，不生成封面图，不进入视觉设计。
-- 输出 Markdown，方便我回填到内容工作站继续编辑。
-
-【账号背景】
-- 身份：${settings.role}
-- 经历：${settings.experience}
-- 目标受众：${settings.audience}
-- 表达风格：${settings.style}
-- 内容目标：${settings.goal}
-
-【选题简报】
-- 主标题：${item.title}
-- 副标题：${item.subtitle}
-- 目标人群：${item.audience}
-- 受众痛点：${item.pain || "待补充"}
-- 核心观点：${item.viewpoint || "待补充"}
-- 可用案例：${item.cases || "信息不足时标记待补充，不得虚构"}
-- 视频时长与呈现：${item.recordingMode}，${item.productionPlan}
-- 发布平台：${item.platforms.join("、")}
-
-【本阶段需要输出】
-1. 3 个副标题候选并推荐 1 个
-2. 完整视频口播稿
-3. 内容段落与时间轴
-4. 素材插入建议
-5. 四平台发布文案
-6. 需要补充的真实案例问题
-7. 内容结构与标题安排原因
-
-避免定义堆砌和 AI 腔，按“场景 → 问题 → 我的判断 → 怎么做 → 总结行动”推进；只使用已提供的个人经历。`;
+function publishingPackageLabel(selectedPlatforms: Platform[]) {
+  if (selectedPlatforms.length === 1) return `${selectedPlatforms[0]}发布包`;
+  if (selectedPlatforms.length > 1) return `${selectedPlatforms.length}平台发布包`;
+  return "平台发布包";
 }
 
-function htmlTaskPromptFor(item: ContentItem, settings: Settings) {
-  return `请使用 product-manager-content-creator Skill，只为下面这条已经确认的内容制作静态 HTML 录屏页。
-
-【重要边界】
-- 内容稿已经人工确认，不要重写观点、案例和口播顺序。
-- 本次只生成 HTML 演示页及页面与口播映射，不生成封面图，不扩展新的内容结论。
-- HTML 必须是单文件，可直接打开，并按口播顺序从上到下录制。
-
-【账号与呈现】
-- 身份：${settings.role}
-- 表达风格：${settings.style}
-- 呈现方式：${item.recordingMode}
-- HTML 视觉风格：${item.htmlStyle}｜${htmlStyles[item.htmlStyle].description}
-
-【内容标题】
-${item.title}
-${item.subtitle}
-
-【已确认内容稿】
-${item.script}
-
-【需要输出】
-1. 静态 HTML 文件
-2. 页面顺序与口播段落映射
-3. 每屏建议停留时间和切换提示
-4. 说明如何落实“${item.htmlStyle}”风格，同时保证录屏可读性
-
-不要用大段定义铺满页面；一屏只表达一个判断，屏幕文字用于辅助观看，不要把整段口播原样堆到页面。`;
+function selectedPlatformNames(selectedPlatforms: Platform[]) {
+  return selectedPlatforms.length ? selectedPlatforms.join("、") : "尚未选择平台";
 }
 
-function coverTaskPromptFor(item: ContentItem, settings: Settings) {
-  return `请使用 product-manager-content-creator Skill 和 imagegen Skill，只为下面这条已经确认的内容制作封面图。
+function missingPublishingAssets(item: ContentItem) {
+  const missing: string[] = [];
+  const needsHtml = item.recordingMode === "HTML录屏" || item.recordingMode === "混合录制";
+  if (needsHtml && !(item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId)) missing.push("HTML");
+  if (!(item.coverState === "已生成" && item.coverManifest && item.coverRunId)) missing.push("三尺寸封面");
+  return missing;
+}
 
-【重要边界】
-- 内容稿和标题已经人工确认，不重写正文，不生成 HTML。
-- 分别生成 16:9、4:3、3:4 三张独立构图，不使用同一张图机械裁切。
-- 三张图保持同一视觉识别，瀑布流小图下主标题仍清晰。
-
-【账号与封面】
-- 身份：${settings.role}
-- 账号风格：${settings.style}
-- 封面视觉风格：${item.coverStyle}｜${coverStyles[item.coverStyle].description}
-
-【内容标题】
-- 主标题：${item.title}
-- 副标题：${item.subtitle}
-
-【已确认内容摘要】
-${item.script.slice(0, 1800)}
-
-【需要输出】
-1. 16:9 封面图
-2. 4:3 封面图
-3. 3:4 封面图
-4. 三个尺寸的安全区、标题层级和构图说明
-
-先提炼不超过两层的封面短文案，再生成图片；不要把完整标题和内容目录全部塞进封面。`;
+function publishingDisabledReason(item: ContentItem) {
+  const missing = missingPublishingAssets(item);
+  return missing.length ? `请先接受${missing.join("与")}` : "";
 }
 
 function productionStagesFor(item: ContentItem) {
@@ -255,8 +229,9 @@ function productionStagesFor(item: ContentItem) {
     { title: "选题简报", description: "标题、人群和核心观点已进入内容库", done: Boolean(item.title.trim()) },
     { title: "内容草稿", description: "生成并回填可编辑的完整稿件", done: Boolean(item.script.trim()) },
     { title: "确认内容", description: "人工确认后才进入视觉制作", done: item.draftState === "已确认" },
-    { title: needsHtml ? "HTML 录屏页" : "画面素材方案", description: needsHtml ? `当前风格：${item.htmlStyle}` : "出镜内容无需 HTML 页面", done: !needsHtml || item.htmlState === "已生成" },
-    { title: "三尺寸封面", description: `当前风格：${item.coverStyle}`, done: item.coverState === "已生成" },
+    { title: needsHtml ? "HTML 录屏页" : "画面素材方案", description: needsHtml ? `当前风格：${item.htmlStyle}` : "出镜内容无需 HTML 页面", done: !needsHtml || Boolean(item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId) },
+    { title: "三尺寸封面", description: `当前风格：${item.coverStyle}`, done: Boolean(item.coverState === "已生成" && item.coverManifest && item.coverRunId) },
+    { title: publishingPackageLabel(item.platforms), description: `面向${selectedPlatformNames(item.platforms)}，验收后可下载 Markdown`, done: Boolean(item.publishingState === "已生成" && item.publishingManifest && item.publishingRunId) },
     { title: "录制与发布", description: published ? "内容已经发布" : recorded ? "已录制，等待发布" : "视觉资产完成后进入录制", done: published },
   ];
 }
@@ -274,12 +249,30 @@ function normalizeDatabase(data: Database): Database {
       draftState: item.draftState || (item.script ? "编辑中" : "未生成"),
       htmlState: item.htmlState || "未开始",
       coverState: item.coverState || "未开始",
+      publishingState: item.publishingState || "未开始",
       htmlStyle: item.htmlStyle || "专业科技",
       coverStyle: item.coverStyle || "高对比科技",
       origin: item.origin || "工作站创作",
       publishedAt: item.publishedAt || "",
       publishLinks: item.publishLinks || {},
       archiveNotes: item.archiveNotes || "",
+      contentVersion: item.contentVersion || 0,
+      acceptedRunId: item.acceptedRunId || "",
+      latestRunId: item.latestRunId || "",
+      latestRunStatus: item.latestRunStatus || "idle",
+      contentVersions: item.contentVersions || [],
+      htmlRunId: item.htmlRunId || "",
+      coverRunId: item.coverRunId || "",
+      pendingHtmlRunId: item.pendingHtmlRunId || "",
+      pendingCoverRunId: item.pendingCoverRunId || "",
+      htmlManifest: item.htmlManifest || null,
+      coverManifest: item.coverManifest || null,
+      pendingHtmlManifest: item.pendingHtmlManifest || null,
+      pendingCoverManifest: item.pendingCoverManifest || null,
+      publishingRunId: item.publishingRunId || "",
+      pendingPublishingRunId: item.pendingPublishingRunId || "",
+      publishingManifest: item.publishingManifest || null,
+      pendingPublishingManifest: item.pendingPublishingManifest || null,
     })),
     cases: data.cases.filter((item) => !legacyTestCaseIds.has(item.id) && !item.id.startsWith("case-test-")),
   };
@@ -366,7 +359,6 @@ export default function Home() {
   const [db, setDb] = useState<Database>(seedData);
   const [ready, setReady] = useState(false);
   const [form, setForm] = useState<ContentForm>(initialForm);
-  const [taskPayload, setTaskPayload] = useState<{ eyebrow: string; title: string; description: string; prompt: string } | null>(null);
   const [researchOpen, setResearchOpen] = useState(false);
   const [scoutTopic, setScoutTopic] = useState("");
   const [topicAngles, setTopicAngles] = useState<TopicAngle[]>([]);
@@ -381,28 +373,42 @@ export default function Home() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyForm, setHistoryForm] = useState<HistoryForm>(initialHistoryForm);
   const [caseDraft, setCaseDraft] = useState({ title: "", industry: "", background: "", result: "" });
+  const [bridgeState, setBridgeState] = useState<"checking" | "connected" | "offline">("checking");
+  const [activeRun, setActiveRun] = useState<BridgeRun | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
+  const pollingRuns = useRef(new Set<string>());
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      void (async () => {
+        let loadedDatabase = seedData;
       try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
-          setDb(normalizeDatabase(JSON.parse(saved) as Database));
+          loadedDatabase = normalizeDatabase(JSON.parse(saved) as Database);
         } else {
           const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
           if (legacy) {
             const migrated = normalizeDatabase(JSON.parse(legacy) as Database);
-            setDb(migrated);
+            loadedDatabase = migrated;
             localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
             localStorage.removeItem(LEGACY_STORAGE_KEY);
           }
         }
       } catch {
         setNotice("本地数据读取失败，已加载演示数据。");
-      } finally {
-        setReady(true);
       }
+        try {
+          await connectLocalBridge();
+          const { state } = await getWorkstationState<Database>();
+          if (state?.database) loadedDatabase = normalizeDatabase(state.database);
+          else if (loadedDatabase.contents.length || loadedDatabase.cases.length || loadedDatabase.settings.name) await saveWorkstationState(loadedDatabase);
+        } catch {
+          // Bridge state is an additional local persistence layer; browser data remains the offline fallback.
+        }
+        setDb(loadedDatabase);
+        setReady(true);
+      })();
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -410,7 +416,18 @@ export default function Home() {
   useEffect(() => {
     if (!ready) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    const timer = window.setTimeout(() => {
+      void saveWorkstationState(db).catch(() => {});
+    }, 600);
+    return () => window.clearTimeout(timer);
   }, [db, ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    void reconnectBridge(true);
+    // Bridge recovery runs once after local content has finished loading.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   useEffect(() => {
     if (!notice) return;
@@ -446,10 +463,6 @@ export default function Home() {
   const priorityStages = useMemo(() => priorityContent ? productionStagesFor(priorityContent) : [], [priorityContent]);
   const completedPriorityStages = priorityStages.filter((stage) => stage.done).length;
   const priorityNext = priorityStages.find((stage) => !stage.done) ?? null;
-
-  const contentTaskPrompt = useMemo(() => {
-    return `请使用 product-manager-content-creator Skill，先为我的个人账号完成本期“内容草稿”。\n\n【本次只做内容】\n- 先生成可编辑、可确认的内容稿。\n- 不生成 HTML 页面，不生成封面图，不进入视觉设计。\n- 内容确认以后，我会再单独发起 HTML 和封面任务。\n\n【账号背景】\n- 身份：${db.settings.role}\n- 经历：${db.settings.experience}\n- 目标受众：${db.settings.audience}\n- 表达风格：${db.settings.style}\n- 内容目标：${db.settings.goal}\n\n【本期选题】\n- 主标题：${form.title || "（请补充）"}\n- 副标题：${form.subtitle || "请提供 3 个候选并推荐 1 个"}\n- 为什么现在讲：${form.whyNow || "（请补充）"}\n- 目标人群：${form.audience || db.settings.audience}\n- 受众痛点：${form.pain || "（请补充）"}\n- 核心观点：${form.viewpoint || "（请补充）"}\n- 参考素材：${form.sources || "无"}\n- 可使用的亲身案例：${form.cases || "请优先从案例库方向中判断，如信息不足请标记待补充，不要虚构。"}\n- 视频时长：${form.duration}\n- 呈现方式：${form.recordingMode}\n- 发布平台：${form.platforms.join("、")}\n\n【内容结构要求】\n${recordingGuidance[form.recordingMode]}\n\n【本阶段需要输出】\n1. 3 个副标题候选并推荐 1 个\n2. 补充受众痛点和核心冲突\n3. 完整视频口播稿\n4. 与口播对应的内容段落和时间轴\n5. 素材插入建议\n6. 四平台发布文案\n7. 需要我补充的真实案例问题\n\n【具体要求】\n1. 口播稿避免定义堆砌和 AI 腔，用一次真实工作场景或判断冲突开场。\n2. 按“场景 → 问题 → 我的判断 → 怎么做 → 总结行动”推进，保留接地气、理性专业的表达。\n3. 如果引用我的经历，只使用已提供信息；缺少细节时先列出需补充的问题。\n4. 严格按照本期选择的“${form.recordingMode}”安排内容段落和录制节奏。\n5. 结尾说明内容结构与标题这样安排的原因。\n6. 输出 Markdown，便于我在工作站中继续编辑。`;
-  }, [db.settings, form]);
 
   const researchPrompt = useMemo(() => {
     const topic = scoutTopic.trim() || "（请填写议题）";
@@ -498,6 +511,7 @@ export default function Home() {
           draftState: briefChanged && item.draftState === "已确认" ? "编辑中" : item.draftState,
           htmlState: briefChanged && item.draftState === "已确认" ? "待生成" : item.htmlState,
           coverState: briefChanged && item.draftState === "已确认" ? "待生成" : item.coverState,
+          publishingState: briefChanged && item.draftState === "已确认" ? "待生成" : item.publishingState,
           updatedAt: date,
         } : item),
       }));
@@ -524,6 +538,7 @@ export default function Home() {
       draftState: "未生成",
       htmlState: "未开始",
       coverState: "未开始",
+      publishingState: "未开始",
       htmlStyle: "专业科技",
       coverStyle: "高对比科技",
       metrics: emptyMetrics(),
@@ -531,6 +546,23 @@ export default function Home() {
       publishedAt: "",
       publishLinks: {},
       archiveNotes: "",
+      contentVersion: 0,
+      acceptedRunId: "",
+      latestRunId: "",
+      latestRunStatus: "idle",
+      contentVersions: [],
+      htmlRunId: "",
+      coverRunId: "",
+      pendingHtmlRunId: "",
+      pendingCoverRunId: "",
+      htmlManifest: null,
+      coverManifest: null,
+      pendingHtmlManifest: null,
+      pendingCoverManifest: null,
+      publishingRunId: "",
+      pendingPublishingRunId: "",
+      publishingManifest: null,
+      pendingPublishingManifest: null,
     };
     setDb((current) => ({ ...current, contents: [item, ...current.contents] }));
     setSelectedId(item.id);
@@ -570,18 +602,376 @@ export default function Home() {
   }
 
   function openContentTask() {
-    if (!saveDraft()) return;
-    setTaskPayload({ eyebrow: "CONTENT DRAFT", title: "第一阶段：只生成内容", description: "生成后直接回到本页粘贴、编辑和确认，不需要再进入内容库。", prompt: contentTaskPrompt });
+    const contentId = saveDraft();
+    if (!contentId) return;
+    void startContentGeneration(contentId, {
+      title: form.title.trim(),
+      subtitle: form.subtitle.trim(),
+      whyNow: form.whyNow,
+      audience: form.audience,
+      pain: form.pain,
+      viewpoint: form.viewpoint,
+      sources: form.sources,
+      cases: form.cases,
+      duration: form.duration,
+      platforms: form.platforms,
+      outputs: form.outputs,
+      recordingMode: form.recordingMode,
+      productionPlan: productionPlanFor(form.recordingMode),
+    });
   }
 
-  async function copyTask() {
-    if (!taskPayload) return;
+  async function reconnectBridge(recoverRuns = false) {
+    setBridgeState("checking");
     try {
-      await navigator.clipboard.writeText(taskPayload.prompt);
-      setNotice("Codex 任务指令已复制，可以直接粘贴使用。");
+      await connectLocalBridge();
+      setBridgeState("connected");
+      if (!recoverRuns) return;
+      const { runs } = await listBridgeRuns();
+      const recoverable = runs.find((run) => run.status === "queued" || run.status === "running");
+      if (recoverable) {
+        if (recoverable.taskType === "content") void pollContentRun(recoverable);
+        else void pollVisualRun(recoverable);
+        return;
+      }
+      const unapplied = runs.find((run) => run.taskType === "content" && run.status === "completed" && db.contents.some((item) => item.id === run.contentId && !item.contentVersions.some((version) => version.runId === run.runId)));
+      if (unapplied) void pollContentRun(unapplied);
+      const unfinishedVisual = runs.find((run) => (run.taskType === "html" || run.taskType === "cover" || run.taskType === "publishing") && run.status === "completed" && db.contents.some((item) => item.id === run.contentId && (item.pendingHtmlRunId === run.runId || item.pendingCoverRunId === run.runId || item.pendingPublishingRunId === run.runId) && !(item.pendingHtmlManifest || item.pendingCoverManifest || item.pendingPublishingManifest)));
+      if (unfinishedVisual) void pollVisualRun(unfinishedVisual);
     } catch {
-      setNotice("复制失败，请在任务面板中手动选择文本。");
+      setBridgeState("offline");
     }
+  }
+
+  async function startContentGeneration(contentId: string, contentBrief: Record<string, unknown>) {
+    if (activeRun) {
+      setNotice("当前已有 Codex 任务运行，请等待完成或先停止。 ");
+      return;
+    }
+    const current = db.contents.find((item) => item.id === contentId);
+    const nextVersion = (current?.contentVersion || 0) + 1;
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => item.id === contentId ? {
+        ...item,
+        contentVersion: nextVersion,
+        latestRunStatus: "queued",
+        updatedAt: today(),
+      } : item),
+    }));
+    let bridgeConnected = false;
+    try {
+      setBridgeState("checking");
+      await connectLocalBridge();
+      bridgeConnected = true;
+      setBridgeState("connected");
+      const { run } = await createContentRun({
+        contentId,
+        contentVersion: nextVersion,
+        creatorContext: {
+          name: db.settings.name,
+          role: db.settings.role,
+          experience: db.settings.experience,
+          audience: db.settings.audience,
+          voice: db.settings.style,
+          goal: db.settings.goal,
+          cases: db.cases.slice(0, 12),
+        },
+        contentBrief,
+      });
+      setDb((database) => ({
+        ...database,
+        contents: database.contents.map((item) => item.id === contentId ? { ...item, latestRunId: run.runId, latestRunStatus: run.status } : item),
+      }));
+      setNotice("Codex 已开始生成内容，完成后会自动回填。 ");
+      await pollContentRun(run);
+    } catch (error) {
+      setBridgeState(bridgeConnected ? "connected" : "offline");
+      setDb((database) => ({
+        ...database,
+        contents: database.contents.map((item) => item.id === contentId ? { ...item, latestRunStatus: "failed" } : item),
+      }));
+      setNotice(error instanceof Error ? error.message : "无法连接本机 Codex Bridge。 ");
+    }
+  }
+
+  async function pollContentRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => item.id === run.contentId ? { ...item, latestRunId: run.runId, latestRunStatus: run.status } : item),
+        }));
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const result = await getContentResult(run.runId);
+        const generatedVersion: ContentVersion = {
+          version: run.contentVersion,
+          runId: run.runId,
+          createdAt: run.completedAt || new Date().toISOString(),
+          subtitle: result.recommendedSubtitle,
+          pain: result.audiencePain.join("\n"),
+          viewpoint: result.coreThesis,
+          script: result.script.fullMarkdown,
+          state: "候选",
+        };
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => {
+            if (item.id !== run.contentId || item.contentVersions.some((version) => version.runId === run.runId)) return item;
+            const preserveConfirmed = item.draftState === "已确认";
+            const versions = [
+              { ...generatedVersion, state: preserveConfirmed ? "候选" as const : "已采用" as const },
+              ...item.contentVersions.map((version) => preserveConfirmed ? version : { ...version, state: "候选" as const }),
+            ];
+            return {
+              ...item,
+              subtitle: preserveConfirmed ? item.subtitle : generatedVersion.subtitle || item.subtitle,
+              pain: preserveConfirmed ? item.pain : generatedVersion.pain,
+              viewpoint: preserveConfirmed ? item.viewpoint : generatedVersion.viewpoint,
+              script: preserveConfirmed ? item.script : generatedVersion.script,
+              draftState: preserveConfirmed ? item.draftState : "编辑中",
+              acceptedRunId: preserveConfirmed ? item.acceptedRunId : run.runId,
+              latestRunId: run.runId,
+              latestRunStatus: "completed",
+              contentVersions: versions,
+              updatedAt: today(),
+            };
+          }),
+        }));
+        setNotice("内容生成完成，已回填为可编辑稿件。 ");
+      } else {
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => item.id === run.contentId ? { ...item, latestRunStatus: run.status } : item),
+        }));
+        setNotice(run.status === "cancelled" ? "内容生成已停止。" : run.error?.message || "内容生成未完成，请重试。 ");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取 Codex 结果失败。 ");
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setActiveRun((currentRun) => currentRun?.runId === initialRun.runId ? null : currentRun);
+    }
+  }
+
+  async function startVisualGeneration(item: ContentItem, taskType: "html" | "cover" | "publishing") {
+    if (item.draftState !== "已确认" || !item.script.trim()) {
+      setNotice("请先确认内容稿，再生成视觉资产。 ");
+      return;
+    }
+    if (activeRun) {
+      setNotice("当前已有 Codex 任务运行，请等待完成或先停止。 ");
+      return;
+    }
+    const missingAssets = taskType === "publishing" ? missingPublishingAssets(item) : [];
+    if (missingAssets.length) {
+      setNotice(`请先接受${missingAssets.join("与")}，再生成发布包。`);
+      return;
+    }
+    if (taskType === "publishing" && item.platforms.length === 0) {
+      setNotice("请先为本期内容选择至少一个发布平台。 ");
+      return;
+    }
+    const packageLabel = publishingPackageLabel(item.platforms);
+    const style = taskType === "html" ? htmlStyles[item.htmlStyle] : taskType === "cover" ? coverStyles[item.coverStyle] : { description: `仅根据已选择的${selectedPlatformNames(item.platforms)}生成发布包。` };
+    const styleName = taskType === "html" ? item.htmlStyle : taskType === "cover" ? item.coverStyle : packageLabel;
+    const styleConfig: Record<string, unknown> = {
+      styleId: styleName,
+      styleName,
+      description: style.description,
+      recordingMode: item.recordingMode,
+      title: item.title,
+      subtitle: item.subtitle,
+    };
+    if (taskType === "cover") {
+      styleConfig.guidance = coverStyles[item.coverStyle].guidance || "遵循所选风格，同时保证瀑布流小图可读。";
+      styleConfig.portraitMode = "approved-creator-asset-only";
+      styleConfig.portraitAvailable = false;
+      styleConfig.fallback = "topic-object";
+      styleConfig.sizes = ["16:9", "4:3", "3:4"];
+    }
+    if (taskType === "publishing") {
+      styleConfig.platforms = item.platforms;
+      styleConfig.htmlStyle = item.htmlStyle;
+      styleConfig.coverStyle = item.coverStyle;
+      styleConfig.acceptedAssets = {
+        html: item.htmlManifest ? { runId: item.htmlRunId, generationMode: item.htmlManifest.generationMode, artifacts: item.htmlManifest.artifacts.map((artifact) => artifact.path) } : null,
+        covers: item.coverManifest ? { runId: item.coverRunId, generationMode: item.coverManifest.generationMode, artifacts: item.coverManifest.artifacts.map((artifact) => artifact.path), notes: item.coverManifest.notes } : null,
+      };
+      styleConfig.creator = { role: db.settings.role, audience: db.settings.audience, voice: db.settings.style, goal: db.settings.goal };
+    }
+    try {
+      await connectLocalBridge();
+      setBridgeState("connected");
+      const { run } = await createVisualRun({
+        contentId: item.id,
+        taskType,
+        contentVersion: Math.max(1, item.contentVersion),
+        confirmedContent: `# ${item.title}\n\n${item.subtitle}\n\n${item.script}`,
+        styleConfig,
+      });
+      setDb((database) => ({
+        ...database,
+        contents: database.contents.map((content) => content.id === item.id ? {
+          ...content,
+          ...(taskType === "html" ? { pendingHtmlRunId: run.runId, pendingHtmlManifest: null, htmlState: "待生成" as const } : taskType === "cover" ? { pendingCoverRunId: run.runId, pendingCoverManifest: null, coverState: "待生成" as const } : { pendingPublishingRunId: run.runId, pendingPublishingManifest: null, publishingState: "待生成" as const }),
+          updatedAt: today(),
+        } : content),
+      }));
+      setNotice(taskType === "html" ? "Codex 已开始生成 HTML 录屏页。" : taskType === "cover" ? "Codex 已开始生成三尺寸封面。 " : `Codex 已开始生成${packageLabel}。`);
+      await pollVisualRun(run);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "视觉任务启动失败。 ");
+    }
+  }
+
+  async function continueProductionRun(item: ContentItem, taskType: "html" | "cover" | "publishing", instruction: string) {
+    const trimmed = instruction.trim();
+    if (!trimmed) {
+      setNotice("请先写清楚希望 Codex 修改什么。 ");
+      return;
+    }
+    if (activeRun) {
+      setNotice("当前已有 Codex 任务运行，请等待完成或先停止。 ");
+      return;
+    }
+    const baseRunId = taskType === "html" ? (item.pendingHtmlRunId || item.htmlRunId) : taskType === "cover" ? (item.pendingCoverRunId || item.coverRunId) : (item.pendingPublishingRunId || item.publishingRunId);
+    if (!baseRunId) {
+      setNotice("请先生成第一版产物，再继续修改。 ");
+      return;
+    }
+    try {
+      await connectLocalBridge();
+      setBridgeState("connected");
+      const { run } = await continueBridgeRun(baseRunId, trimmed);
+      setDb((database) => ({
+        ...database,
+        contents: database.contents.map((content) => content.id === item.id ? {
+          ...content,
+          ...(taskType === "html" ? { pendingHtmlRunId: run.runId, pendingHtmlManifest: null, htmlState: "待生成" as const } : taskType === "cover" ? { pendingCoverRunId: run.runId, pendingCoverManifest: null, coverState: "待生成" as const } : { pendingPublishingRunId: run.runId, pendingPublishingManifest: null, publishingState: "待生成" as const }),
+          updatedAt: today(),
+        } : content),
+      }));
+      setNotice("Codex 已在原任务上下文中继续修改。 ");
+      await pollVisualRun(run);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "继续修改任务启动失败。 ");
+    }
+  }
+
+  async function pollVisualRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const manifest = await getArtifactManifest(run.runId);
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => item.id === run.contentId ? {
+            ...item,
+            ...(run.taskType === "html" ? { pendingHtmlRunId: run.runId, pendingHtmlManifest: manifest } : run.taskType === "cover" ? { pendingCoverRunId: run.runId, pendingCoverManifest: manifest } : { pendingPublishingRunId: run.runId, pendingPublishingManifest: manifest }),
+            updatedAt: today(),
+          } : item),
+        }));
+        const completedItem = db.contents.find((item) => item.id === run.contentId);
+        setNotice(run.taskType === "html" ? "HTML 已生成，请预览后接受。" : run.taskType === "cover" ? `三尺寸封面已生成（${manifest.generationMode === "codex-template-render" ? "模板降级" : "图片混合生成"}），请预览后接受。` : `${publishingPackageLabel(completedItem?.platforms || [])}已生成，请检查后接受并下载。`);
+      } else {
+        setNotice(run.status === "cancelled" ? "视觉生成已停止。" : run.error?.message || "视觉生成未完成，请重试。 ");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取视觉产物失败。 ");
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setActiveRun((currentRun) => currentRun?.runId === initialRun.runId ? null : currentRun);
+    }
+  }
+
+  function acceptVisualAsset(contentId: string, taskType: "html" | "cover" | "publishing") {
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => {
+        if (item.id !== contentId) return item;
+        const pendingRunId = taskType === "html" ? item.pendingHtmlRunId : taskType === "cover" ? item.pendingCoverRunId : item.pendingPublishingRunId;
+        const pendingManifest = taskType === "html" ? item.pendingHtmlManifest : taskType === "cover" ? item.pendingCoverManifest : item.pendingPublishingManifest;
+        if (!pendingRunId || !pendingManifest) return item;
+        return {
+          ...item,
+          ...(taskType === "html" ? { htmlRunId: pendingRunId, htmlManifest: pendingManifest, htmlState: "已生成" as const, pendingHtmlRunId: "", pendingHtmlManifest: null } : taskType === "cover" ? { coverRunId: pendingRunId, coverManifest: pendingManifest, coverState: "已生成" as const, pendingCoverRunId: "", pendingCoverManifest: null } : { publishingRunId: pendingRunId, publishingManifest: pendingManifest, publishingState: "已生成" as const, pendingPublishingRunId: "", pendingPublishingManifest: null, status: (["已录制", "已发布", "已复盘"] as ContentStatus[]).includes(item.status) ? item.status : "待录制" as const }),
+          updatedAt: today(),
+        };
+      }),
+    }));
+    const acceptedItem = db.contents.find((item) => item.id === contentId);
+    setNotice(taskType === "html" ? "HTML 录屏页已接受。" : taskType === "cover" ? "三尺寸封面已接受。 " : `${publishingPackageLabel(acceptedItem?.platforms || [])}已接受，可下载使用。`);
+  }
+
+  async function stopActiveRun() {
+    if (!activeRun) return;
+    try {
+      const { run } = await cancelBridgeRun(activeRun.runId);
+      setActiveRun(run);
+      setNotice("正在停止 Codex 任务……");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "停止任务失败。 ");
+    }
+  }
+
+  function generateForItem(item: ContentItem) {
+    void startContentGeneration(item.id, {
+      title: item.title,
+      subtitle: item.subtitle,
+      audience: item.audience,
+      pain: item.pain,
+      viewpoint: item.viewpoint,
+      cases: item.cases,
+      platforms: item.platforms,
+      outputs: item.outputs,
+      recordingMode: item.recordingMode,
+      productionPlan: item.productionPlan,
+    });
+  }
+
+  function applyContentVersion(contentId: string, runId: string) {
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => {
+        if (item.id !== contentId) return item;
+        const version = item.contentVersions.find((candidate) => candidate.runId === runId);
+        if (!version) return item;
+        return {
+          ...item,
+          subtitle: version.subtitle || item.subtitle,
+          pain: version.pain,
+          viewpoint: version.viewpoint,
+          script: version.script,
+          draftState: "编辑中",
+          acceptedRunId: runId,
+          contentVersions: item.contentVersions.map((candidate) => ({ ...candidate, state: candidate.runId === runId ? "已采用" : "候选" })),
+          htmlState: item.htmlState === "已生成" ? "待生成" : item.htmlState,
+          coverState: item.coverState === "已生成" ? "待生成" : item.coverState,
+          publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
+          updatedAt: today(),
+        };
+      }),
+    }));
+    setNotice("已切换到所选内容版本，请检查后重新确认。 ");
   }
 
   async function copyResearchTask() {
@@ -658,6 +1048,7 @@ export default function Home() {
         recordingMode: mode,
         productionPlan: productionPlanFor(mode),
         outputs: Array.from(new Set([...item.outputs, ...outputsByMode[mode]])),
+        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
         updatedAt: today(),
       } : item),
     }));
@@ -673,6 +1064,7 @@ export default function Home() {
         draftState: item.draftState === "已确认" ? "编辑中" : script.trim() ? "编辑中" : "未生成",
         htmlState: item.draftState === "已确认" ? "待生成" : item.htmlState,
         coverState: item.draftState === "已确认" ? "待生成" : item.coverState,
+        publishingState: item.draftState === "已确认" ? "待生成" : item.publishingState,
         updatedAt: today(),
       } : item),
     }));
@@ -692,25 +1084,45 @@ export default function Home() {
         status: "已生成",
         htmlState: content.htmlState === "未开始" ? "待生成" : content.htmlState,
         coverState: content.coverState === "未开始" ? "待生成" : content.coverState,
+        publishingState: content.publishingState === "未开始" ? "待生成" : content.publishingState,
         updatedAt: today(),
       } : content),
     }));
-    setNotice("内容稿已确认，现在可以分别制作 HTML 和封面。 ");
+    setNotice("内容稿已确认，现在可以制作 HTML、封面和发布包。 ");
   }
 
   function updateHtmlStyle(id: string, style: HtmlStyle) {
-    setDb((current) => ({ ...current, contents: current.contents.map((item) => item.id === id ? { ...item, htmlStyle: style, htmlState: item.htmlState === "已生成" ? "待生成" : item.htmlState, updatedAt: today() } : item) }));
+    setDb((current) => ({ ...current, contents: current.contents.map((item) => {
+      if (item.id !== id || item.htmlStyle === style) return item;
+      return {
+        ...item,
+        htmlStyle: style,
+        htmlState: item.htmlState === "已生成" ? "待生成" : item.htmlState,
+        htmlRunId: "",
+        htmlManifest: null,
+        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
+        publishingRunId: "",
+        publishingManifest: null,
+        updatedAt: today(),
+      };
+    }) }));
   }
 
   function updateCoverStyle(id: string, style: CoverStyle) {
-    setDb((current) => ({ ...current, contents: current.contents.map((item) => item.id === id ? { ...item, coverStyle: style, coverState: item.coverState === "已生成" ? "待生成" : item.coverState, updatedAt: today() } : item) }));
-  }
-
-  function updateAssetState(id: string, kind: "html" | "cover", state: AssetState) {
-    setDb((current) => ({
-      ...current,
-      contents: current.contents.map((item) => item.id === id ? { ...item, [kind === "html" ? "htmlState" : "coverState"]: state, updatedAt: today() } : item),
-    }));
+    setDb((current) => ({ ...current, contents: current.contents.map((item) => {
+      if (item.id !== id || item.coverStyle === style) return item;
+      return {
+        ...item,
+        coverStyle: style,
+        coverState: item.coverState === "已生成" ? "待生成" : item.coverState,
+        coverRunId: "",
+        coverManifest: null,
+        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
+        publishingRunId: "",
+        publishingManifest: null,
+        updatedAt: today(),
+      };
+    }) }));
   }
 
   function updateMetric(id: string, platform: Platform, field: keyof Omit<Metric, "platform">, value: number) {
@@ -774,6 +1186,7 @@ export default function Home() {
       draftState: historyForm.script.trim() ? "已确认" : "未生成",
       htmlState: "未开始",
       coverState: "未开始",
+      publishingState: "未开始",
       htmlStyle: "专业科技",
       coverStyle: "高对比科技",
       metrics: historyForm.metrics,
@@ -781,6 +1194,23 @@ export default function Home() {
       publishedAt: historyForm.publishedAt,
       publishLinks: historyForm.publishLinks,
       archiveNotes: historyForm.archiveNotes,
+      contentVersion: 0,
+      acceptedRunId: "",
+      latestRunId: "",
+      latestRunStatus: "idle",
+      contentVersions: [],
+      htmlRunId: "",
+      coverRunId: "",
+      pendingHtmlRunId: "",
+      pendingCoverRunId: "",
+      htmlManifest: null,
+      coverManifest: null,
+      pendingHtmlManifest: null,
+      pendingCoverManifest: null,
+      publishingRunId: "",
+      pendingPublishingRunId: "",
+      publishingManifest: null,
+      pendingPublishingManifest: null,
     };
     setDb((current) => ({ ...current, contents: [item, ...current.contents] }));
     setSelectedId(item.id);
@@ -894,7 +1324,7 @@ export default function Home() {
         </nav>
         <div className="sidebar-note">
           <span className="live-dot" /> 本地工作模式
-          <p>内容只保存在这台设备的浏览器中，请定期导出备份。</p>
+          <p>内容与任务保存在本机工作站中，请定期导出备份。</p>
         </div>
         <div className="profile-mini">
           <span className="avatar">R</span>
@@ -909,7 +1339,7 @@ export default function Home() {
             <h1>{viewCopy[view].title}</h1>
             <p>{viewCopy[view].description}</p>
           </div>
-          <button className="primary-button top-create" onClick={startNewContent}><span>＋</span> 新建一期内容</button>
+          <div className="topbar-actions"><button className={`bridge-chip bridge-${bridgeState}`} onClick={() => void reconnectBridge()}><i />{bridgeState === "connected" ? "Codex 已连接" : bridgeState === "checking" ? "正在检查 Codex" : "Codex 未连接"}</button><button className="primary-button top-create" onClick={startNewContent}><span>＋</span> 新建一期内容</button></div>
         </header>
 
         {view === "dashboard" && (
@@ -1036,30 +1466,20 @@ export default function Home() {
                 </ol>
               </div>
 
-              <div className="form-actions"><button className="secondary-button" onClick={saveDraft}>{workingContent ? "更新当前选题" : "保存选题草稿"}</button><button className="primary-button" onClick={openContentTask}>生成内容任务指令 →</button></div>
+              <div className="form-actions"><button className="secondary-button" onClick={saveDraft}>{workingContent ? "更新当前选题" : "保存选题草稿"}</button><button className="primary-button" onClick={openContentTask} disabled={Boolean(activeRun)}>{activeRun ? "Codex 正在生成…" : "使用 Codex 生成内容 →"}</button></div>
               {workingContent && <InlineCreationWorkflow
                 item={workingContent}
+                activeRun={activeRun?.contentId === workingContent.id ? activeRun : null}
                 onScript={(script) => updateContentScript(workingContent.id, script)}
                 onConfirm={() => confirmContentScript(workingContent.id)}
+                onGenerate={() => generateForItem(workingContent)}
+                onCancel={() => void stopActiveRun()}
+                onApplyVersion={(runId) => applyContentVersion(workingContent.id, runId)}
                 onHtmlStyle={(style) => updateHtmlStyle(workingContent.id, style)}
                 onCoverStyle={(style) => updateCoverStyle(workingContent.id, style)}
-                onAssetState={(kind, state) => updateAssetState(workingContent.id, kind, state)}
-                onTask={(kind) => setTaskPayload(kind === "content" ? {
-                  eyebrow: "CONTENT DRAFT",
-                  title: "第一阶段：生成内容草稿",
-                  description: "生成后直接回到当前页面粘贴、编辑并确认。",
-                  prompt: contentTaskPromptForItem(workingContent, db.settings),
-                } : kind === "html" ? {
-                  eyebrow: "HTML PRODUCTION",
-                  title: "第三阶段：生成 HTML",
-                  description: `使用“${workingContent.htmlStyle}”风格，只制作录屏页面。`,
-                  prompt: htmlTaskPromptFor(workingContent, db.settings),
-                } : {
-                  eyebrow: "COVER PRODUCTION",
-                  title: "第三阶段：生成三尺寸封面",
-                  description: `使用“${workingContent.coverStyle}”风格，只制作封面图。`,
-                  prompt: coverTaskPromptFor(workingContent, db.settings),
-                })}
+                onGenerateVisual={(kind) => void startVisualGeneration(workingContent, kind)}
+                onAcceptVisual={(kind) => acceptVisualAsset(workingContent.id, kind)}
+                onContinueVisual={(kind, instruction) => void continueProductionRun(workingContent, kind, instruction)}
               />}
             </div>
 
@@ -1099,29 +1519,19 @@ export default function Home() {
               </div>
               {selected && <ContentDetail
                 item={selected}
+                activeRun={activeRun?.contentId === selected.id ? activeRun : null}
                 onStatus={(status) => changeStatus(selected.id, status)}
                 onRecordingMode={(mode) => changeContentRecordingMode(selected.id, mode)}
                 onScript={(script) => updateContentScript(selected.id, script)}
                 onConfirm={() => confirmContentScript(selected.id)}
+                onGenerate={() => generateForItem(selected)}
+                onCancel={() => void stopActiveRun()}
+                onApplyVersion={(runId) => applyContentVersion(selected.id, runId)}
                 onHtmlStyle={(style) => updateHtmlStyle(selected.id, style)}
                 onCoverStyle={(style) => updateCoverStyle(selected.id, style)}
-                onAssetState={(kind, state) => updateAssetState(selected.id, kind, state)}
-                onTask={(kind) => setTaskPayload(kind === "content" ? {
-                  eyebrow: "CONTENT DRAFT",
-                  title: "第一阶段：生成内容草稿",
-                  description: "只生成可编辑内容，不生成 HTML 和封面。",
-                  prompt: contentTaskPromptForItem(selected, db.settings),
-                } : kind === "html" ? {
-                  eyebrow: "HTML PRODUCTION",
-                  title: "第三阶段：生成 HTML",
-                  description: `使用“${selected.htmlStyle}”风格，只制作录屏页面。`,
-                  prompt: htmlTaskPromptFor(selected, db.settings),
-                } : {
-                  eyebrow: "COVER PRODUCTION",
-                  title: "第三阶段：生成三尺寸封面",
-                  description: `使用“${selected.coverStyle}”风格，只制作封面图。`,
-                  prompt: coverTaskPromptFor(selected, db.settings),
-                })}
+                onGenerateVisual={(kind) => void startVisualGeneration(selected, kind)}
+                onAcceptVisual={(kind) => acceptVisualAsset(selected.id, kind)}
+                onContinueVisual={(kind, instruction) => void continueProductionRun(selected, kind, instruction)}
                 onMetric={(platform, field, value) => updateMetric(selected.id, platform, field, value)}
                 onMetadata={(patch) => updateContentMetadata(selected.id, patch)}
                 onDelete={() => deleteContent(selected.id)}
@@ -1210,7 +1620,6 @@ export default function Home() {
         )}
       </main>
 
-      {taskPayload && <div className="modal-backdrop" role="presentation" onMouseDown={() => setTaskPayload(null)}><section className="task-modal" role="dialog" aria-modal="true" aria-labelledby="task-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">{taskPayload.eyebrow}</span><h2 id="task-title">{taskPayload.title}</h2><p>{taskPayload.description} 当前仍需复制到 Codex 中执行。</p></div><button className="icon-button" onClick={() => setTaskPayload(null)} aria-label="关闭">×</button></div><textarea className="task-output" readOnly value={taskPayload.prompt} /><div className="modal-actions"><button className="secondary-button" onClick={() => setTaskPayload(null)}>返回继续编辑</button><button className="primary-button" onClick={copyTask}>复制任务指令</button></div></section></div>}
       {researchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setResearchOpen(false)}><section className="task-modal" role="dialog" aria-modal="true" aria-labelledby="research-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">TOPIC RESEARCH</span><h2 id="research-title">Codex 选题调研指令</h2><p>复制到 Codex 后，它会联网收集可访问样本，并标记需要你人工补充的视频号数据。</p></div><button className="icon-button" onClick={() => setResearchOpen(false)} aria-label="关闭">×</button></div><textarea className="task-output" readOnly value={researchPrompt} /><div className="modal-actions"><button className="secondary-button" onClick={() => setResearchOpen(false)}>暂时不用</button><button className="primary-button" onClick={copyResearchTask}>复制调研指令</button></div></section></div>}
       {historyOpen && <HistoryArchiveModal form={historyForm} onChange={setHistoryForm} onTogglePlatform={toggleHistoryPlatform} onMetric={updateHistoryMetric} onSave={addHistoricalContent} onClose={() => setHistoryOpen(false)} />}
       {notice && <div className="toast" role="status">{notice}</div>}
@@ -1218,29 +1627,197 @@ export default function Home() {
   );
 }
 
-function InlineCreationWorkflow({ item, onScript, onConfirm, onHtmlStyle, onCoverStyle, onAssetState, onTask }: {
+function useRunElapsedSeconds(run: BridgeRun | null) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!run || (run.status !== "queued" && run.status !== "running")) {
+      setElapsed(0);
+      return;
+    }
+    const startedAt = new Date(run.startedAt || run.createdAt).getTime();
+    const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [run]);
+  return elapsed;
+}
+
+function elapsedLabel(seconds: number) {
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+function ContentGenerationPanel({ item, activeRun, onGenerate, onCancel, onApplyVersion }: {
   item: ContentItem;
+  activeRun: BridgeRun | null;
+  onGenerate: () => void;
+  onCancel: () => void;
+  onApplyVersion: (runId: string) => void;
+}) {
+  const isRunning = activeRun?.taskType === "content" && (activeRun.status === "queued" || activeRun.status === "running");
+  const elapsed = useRunElapsedSeconds(isRunning ? activeRun : null);
+  const statusText = isRunning ? activeRun?.status === "queued" ? "任务排队中" : "Codex 正在生成" : item.latestRunStatus === "completed" ? "最近一次生成完成" : item.latestRunStatus === "idle" ? "尚未生成" : `最近任务：${item.latestRunStatus}`;
+  return <div className={`generation-panel ${isRunning ? "running" : ""}`}>
+    <div className="generation-status"><span><i />{statusText}</span><small>{isRunning ? `已进行 ${elapsedLabel(elapsed)}` : `已保留 ${item.contentVersions.length} 个生成版本`}</small></div>
+    {isRunning && <div className="run-activity" role="status" aria-live="polite"><div className="run-activity-copy"><span className="run-spinner" /><div><strong>{activeRun?.status === "queued" ? "已提交，等待本机 Codex 接收任务" : "正在组织内容结构并生成完整稿件"}</strong><small>任务仍在持续运行，完成后会自动回填；可以停留在本页或继续浏览其他内容。</small></div></div><div className="run-progress"><i /></div></div>}
+    <div className="generation-actions"><button className="primary-button" onClick={onGenerate} disabled={Boolean(isRunning)}>{isRunning ? "正在生成…" : item.contentVersions.length ? "重新生成一个版本" : "使用 Codex 生成内容"}</button>{isRunning && <button className="secondary-button" onClick={onCancel}>停止任务</button>}</div>
+    {item.contentVersions.length > 0 && <div className="version-list">{item.contentVersions.slice(0, 4).map((version) => <article key={version.runId} className={version.state === "已采用" ? "accepted" : ""}><div><strong>版本 {version.version}</strong><small>{new Date(version.createdAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} · {version.state}</small></div><p>{version.subtitle || "副标题待完善"}</p>{version.state !== "已采用" && <button onClick={() => onApplyVersion(version.runId)}>采用这个版本</button>}</article>)}</div>}
+  </div>;
+}
+
+function ArtifactPreview({ runId, manifest }: { runId: string; manifest: ArtifactManifest }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [texts, setTexts] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const objectUrls: string[] = [];
+    void Promise.all(manifest.artifacts.map(async (artifact) => {
+      const blob = await getArtifactBlob(runId, artifact.id);
+      const url = URL.createObjectURL(blob);
+      objectUrls.push(url);
+      const previewText = artifact.mimeType === "text/markdown" ? await blob.text() : "";
+      return [artifact.id, url, previewText] as const;
+    })).then((entries) => {
+      if (!disposed) {
+        setUrls(Object.fromEntries(entries.map(([id, url]) => [id, url])));
+        setTexts(Object.fromEntries(entries.filter(([, , previewText]) => previewText).map(([id, , previewText]) => [id, previewText])));
+      }
+    }).catch((reason) => {
+      if (!disposed) setError(reason instanceof Error ? reason.message : "产物预览加载失败");
+    });
+    return () => {
+      disposed = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [manifest, runId]);
+
+  if (error) return <div className="artifact-error">{error}</div>;
+  if (manifest.taskType === "html") {
+    const artifact = manifest.artifacts.find((item) => item.type === "recording-html");
+    return <div className="html-artifact-preview">{artifact && urls[artifact.id] ? <iframe src={urls[artifact.id]} title="HTML 录屏页预览" sandbox="allow-scripts" /> : <span>正在加载 HTML 预览…</span>}</div>;
+  }
+  if (manifest.taskType === "publishing") {
+    const artifact = manifest.artifacts.find((item) => item.type === "publishing-package");
+    return <div className="publishing-artifact-preview">{artifact && texts[artifact.id] ? <><pre>{texts[artifact.id]}</pre><a className="primary-button" href={urls[artifact.id]} download="publishing-package.md">下载发布包 Markdown</a></> : <span>正在加载发布包预览…</span>}</div>;
+  }
+  return <div className="cover-artifact-grid">{manifest.artifacts.map((artifact) => <figure key={artifact.id} className={`cover-${artifact.type}`}><div>{urls[artifact.id] ? <Image src={urls[artifact.id]} alt={`${artifact.type} 封面预览`} width={artifact.width || 900} height={artifact.height || 900} unoptimized /> : <span>正在加载…</span>}</div><figcaption>{artifact.type.replace("cover-", "")} · {artifact.width}×{artifact.height}</figcaption></figure>)}</div>;
+}
+
+function BundleExportPanel({ item }: { item: ContentItem }) {
+  const [exporting, setExporting] = useState(false);
+  const [error, setError] = useState("");
+  const included = [
+    item.script.trim() ? "内容稿" : "",
+    item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId ? "HTML" : "",
+    item.coverState === "已生成" && item.coverManifest && item.coverRunId ? "三张封面" : "",
+    item.publishingState === "已生成" && item.publishingManifest && item.publishingRunId ? publishingPackageLabel(item.platforms) : "",
+  ].filter(Boolean);
+
+  async function downloadBundle() {
+    setExporting(true);
+    setError("");
+    try {
+      const blob = await getContentBundle({
+        contentId: item.id,
+        title: item.title,
+        subtitle: item.subtitle,
+        platforms: item.platforms,
+        script: item.script,
+        runIds: {
+          html: item.htmlState === "已生成" && item.htmlManifest ? item.htmlRunId : "",
+          cover: item.coverState === "已生成" && item.coverManifest ? item.coverRunId : "",
+          publishing: item.publishingState === "已生成" && item.publishingManifest ? item.publishingRunId : "",
+        },
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const safeTitle = item.title.replace(/[\\/:*?"<>|]/g, "-").slice(0, 60) || "本期内容";
+      link.href = url;
+      link.download = `${safeTitle}-完整交付包.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "完整包导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return <section className="bundle-export-panel">
+    <div><span>COMPLETE PACKAGE</span><strong>导出本期完整交付包</strong><small>当前将包含：{included.join("、") || "暂无可导出内容"}</small></div>
+    <button className="primary-button" onClick={() => void downloadBundle()} disabled={exporting || included.length === 0}>{exporting ? "正在打包…" : "下载 ZIP"}</button>
+    {error && <p>{error}</p>}
+  </section>;
+}
+
+function VisualGenerationPanel({ item, taskType, activeRun, onGenerate, onCancel, onAccept, onContinue, disabled = false, disabledReason = "" }: {
+  item: ContentItem;
+  taskType: "html" | "cover" | "publishing";
+  activeRun: BridgeRun | null;
+  onGenerate: () => void;
+  onCancel: () => void;
+  onAccept: () => void;
+  onContinue: (instruction: string) => void;
+  disabled?: boolean;
+  disabledReason?: string;
+}) {
+  const [revisionInstruction, setRevisionInstruction] = useState("");
+  const isRunning = activeRun?.taskType === taskType && (activeRun.status === "queued" || activeRun.status === "running");
+  const elapsed = useRunElapsedSeconds(isRunning ? activeRun : null);
+  const pendingManifest = taskType === "html" ? item.pendingHtmlManifest : taskType === "cover" ? item.pendingCoverManifest : item.pendingPublishingManifest;
+  const pendingRunId = taskType === "html" ? item.pendingHtmlRunId : taskType === "cover" ? item.pendingCoverRunId : item.pendingPublishingRunId;
+  const acceptedManifest = taskType === "html" ? item.htmlManifest : taskType === "cover" ? item.coverManifest : item.publishingManifest;
+  const acceptedRunId = taskType === "html" ? item.htmlRunId : taskType === "cover" ? item.coverRunId : item.publishingRunId;
+  const shownManifest = pendingManifest || acceptedManifest;
+  const shownRunId = pendingManifest ? pendingRunId : acceptedRunId;
+  const packageLabel = publishingPackageLabel(item.platforms);
+  const runningAction = taskType === "html" ? "正在生成录屏页面并检查文件" : taskType === "cover" ? "正在制作三种尺寸并检查画面" : `正在整理${selectedPlatformNames(item.platforms)}的发布文案`;
+  return <div className={`visual-generation ${isRunning ? "running" : ""}`}>
+    <div className="visual-generation-head"><div><strong>{isRunning ? "Codex 正在制作" : pendingManifest ? "新产物等待验收" : acceptedManifest ? "当前已接受产物" : "尚未生成产物"}</strong><small>{disabled ? `尚未解锁：${disabledReason}` : taskType === "cover" ? shownManifest ? shownManifest.generationMode === "codex-template-render" ? "本次使用模板降级生成" : "本次使用图片素材＋精确排版" : "三个尺寸独立生成，不机械裁切" : taskType === "html" ? "单文件 HTML，可直接录屏" : `生成可预览、可下载的${packageLabel} Markdown`}</small></div><div><button className={`primary-button ${disabled && !isRunning ? "locked-action" : ""}`} title={disabled && !isRunning ? disabledReason : undefined} onClick={onGenerate} disabled={Boolean(isRunning)}>{isRunning ? `生成中 · ${elapsedLabel(elapsed)}` : shownManifest ? "重新生成" : disabled ? "查看解锁条件" : "直接生成"}</button>{isRunning && <button className="secondary-button" onClick={onCancel}>停止</button>}</div></div>
+    {isRunning && <div className="run-activity" role="status" aria-live="polite"><div className="run-activity-copy"><span className="run-spinner" /><div><strong>{activeRun?.status === "queued" ? "已提交，等待本机 Codex 接收任务" : runningAction}</strong><small>任务正在本机持续执行，完成后这里会自动出现预览和验收按钮。</small></div></div><div className="run-progress"><i /></div></div>}
+    {shownManifest && shownRunId && <ArtifactPreview runId={shownRunId} manifest={shownManifest} />}
+    {shownManifest && shownRunId && !isRunning && <div className="artifact-revision"><input value={revisionInstruction} onChange={(event) => setRevisionInstruction(event.target.value)} placeholder={taskType === "html" ? "例如：第二屏减少文字，流程图放大" : taskType === "cover" ? "例如：主标题改成 8 个字，黄色更醒目" : "例如：小红书标题更口语，补充 5 个标签"} /><button className="secondary-button" disabled={!revisionInstruction.trim()} onClick={() => { onContinue(revisionInstruction); setRevisionInstruction(""); }}>继续修改</button></div>}
+    {pendingManifest && <div className="artifact-accept"><span>先检查内容、文字和构图，再同步为完成状态。</span><button className="primary-button" onClick={onAccept}>接受这版产物</button></div>}
+  </div>;
+}
+
+function InlineCreationWorkflow({ item, activeRun, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual }: {
+  item: ContentItem;
+  activeRun: BridgeRun | null;
   onScript: (script: string) => void;
   onConfirm: () => void;
+  onGenerate: () => void;
+  onCancel: () => void;
+  onApplyVersion: (runId: string) => void;
   onHtmlStyle: (style: HtmlStyle) => void;
   onCoverStyle: (style: CoverStyle) => void;
-  onAssetState: (kind: "html" | "cover", state: AssetState) => void;
-  onTask: (kind: "content" | "html" | "cover") => void;
+  onGenerateVisual: (kind: "html" | "cover" | "publishing") => void;
+  onAcceptVisual: (kind: "html" | "cover" | "publishing") => void;
+  onContinueVisual: (kind: "html" | "cover" | "publishing", instruction: string) => void;
 }) {
   const confirmed = item.draftState === "已确认";
+  const missingAssets = missingPublishingAssets(item);
+  const publishingReady = missingAssets.length === 0;
+  const deliveryDone = item.publishingState === "已生成" && Boolean(item.publishingManifest);
   return <section className="inline-workflow" id="current-production">
     <div className="inline-workflow-head"><div><span className="eyebrow">CURRENT PRODUCTION</span><h2>继续完成这期内容</h2><p>选题已自动进入内容库，但后续操作都可以在当前页面完成。</p></div><strong>{item.title}</strong></div>
     <ol className="inline-stage-strip">
       <li className={item.script.trim() ? "done" : "current"}><span>1</span>内容回填</li>
       <li className={confirmed ? "done" : item.script.trim() ? "current" : ""}><span>2</span>编辑确认</li>
       <li className={confirmed ? "current" : "locked"}><span>3</span>视觉制作</li>
-      <li className={item.htmlState === "已生成" && item.coverState === "已生成" ? "done" : "locked"}><span>4</span>完成交付</li>
+      <li className={deliveryDone ? "done" : publishingReady ? "current" : "locked"}><span>4</span>发布包交付</li>
     </ol>
 
     <div className="inline-editor-section">
-      <div className="inline-section-head"><div><span>04 · 内容稿</span><h3>生成后直接粘贴到这里</h3></div><strong className={`light-state light-${item.draftState}`}>{item.draftState}</strong></div>
-      <textarea className="inline-content-editor" value={item.script} onChange={(e) => onScript(e.target.value)} placeholder="把 Codex 返回的完整 Markdown 内容粘贴到这里。你可以直接修改、删减并补充真实案例……" />
-      <div className="inline-actions"><span>{item.script.trim().length} 字符 · 自动同步到内容库</span><div><button className="secondary-button" onClick={() => onTask("content")}>{item.script.trim() ? "重新生成内容任务" : "生成内容任务"}</button><button className="primary-button" onClick={onConfirm} disabled={!item.script.trim() || confirmed}>{confirmed ? "内容已确认" : "确认内容，继续制作 →"}</button></div></div>
+      <div className="inline-section-head"><div><span>04 · 内容稿</span><h3>Codex 生成后自动回填，可继续编辑</h3></div><strong className={`light-state light-${item.draftState}`}>{item.draftState}</strong></div>
+      <ContentGenerationPanel item={item} activeRun={activeRun} onGenerate={onGenerate} onCancel={onCancel} onApplyVersion={onApplyVersion} />
+      <textarea className="inline-content-editor" value={item.script} onChange={(e) => onScript(e.target.value)} placeholder="生成完成后内容会自动出现在这里；你也可以直接开始手写和修改……" />
+      <div className="inline-actions"><span>{item.script.trim().length} 字符 · 自动同步到内容库</span><div><button className="primary-button" onClick={onConfirm} disabled={!item.script.trim() || confirmed}>{confirmed ? "内容已确认" : "确认内容，继续制作 →"}</button></div></div>
     </div>
 
     {!confirmed && <div className="inline-gate"><strong>视觉制作尚未解锁</strong><p>先完成上面的内容回填和确认。这样修改观点或口播时，不需要反复重做 HTML 和封面。</p></div>}
@@ -1249,27 +1826,36 @@ function InlineCreationWorkflow({ item, onScript, onConfirm, onHtmlStyle, onCove
       <section>
         <div className="inline-section-head"><div><span>05 · HTML 录屏页</span><h3>选择页面风格后单独生成</h3></div><strong className={`light-state light-${item.htmlState}`}>{item.htmlState}</strong></div>
         <div className="inline-style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div>
-        <div className="inline-asset-actions"><button className="primary-button" onClick={() => { onAssetState("html", "待生成"); onTask("html"); }}>生成 HTML 任务指令</button><button className="secondary-button" onClick={() => onAssetState("html", item.htmlState === "已生成" ? "待生成" : "已生成")}>{item.htmlState === "已生成" ? "重新标记为待生成" : "标记 HTML 已生成"}</button></div>
+        <VisualGenerationPanel item={item} taskType="html" activeRun={activeRun} onGenerate={() => onGenerateVisual("html")} onCancel={onCancel} onAccept={() => onAcceptVisual("html")} onContinue={(instruction) => onContinueVisual("html", instruction)} />
       </section>
       <section>
         <div className="inline-section-head"><div><span>06 · 三尺寸封面</span><h3>选择封面风格后单独生成</h3></div><strong className={`light-state light-${item.coverState}`}>{item.coverState}</strong></div>
         <div className="inline-style-grid">{(Object.entries(coverStyles) as [CoverStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.coverStyle === style ? "selected" : ""} key={style} onClick={() => onCoverStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div>
-        <div className="inline-asset-actions"><button className="primary-button" onClick={() => { onAssetState("cover", "待生成"); onTask("cover"); }}>生成封面任务指令</button><button className="secondary-button" onClick={() => onAssetState("cover", item.coverState === "已生成" ? "待生成" : "已生成")}>{item.coverState === "已生成" ? "重新标记为待生成" : "标记封面已生成"}</button></div>
+        <VisualGenerationPanel item={item} taskType="cover" activeRun={activeRun} onGenerate={() => onGenerateVisual("cover")} onCancel={onCancel} onAccept={() => onAcceptVisual("cover")} onContinue={(instruction) => onContinueVisual("cover", instruction)} />
+      </section>
+      <section>
+        <div className="inline-section-head"><div><span>07 · {publishingPackageLabel(item.platforms)}</span><h3>为 {selectedPlatformNames(item.platforms)} 生成发布文案</h3></div><strong className={`light-state light-${item.publishingState}`}>{item.publishingState}</strong></div>
+        <VisualGenerationPanel item={item} taskType="publishing" activeRun={activeRun} onGenerate={() => onGenerateVisual("publishing")} onCancel={onCancel} onAccept={() => onAcceptVisual("publishing")} onContinue={(instruction) => onContinueVisual("publishing", instruction)} disabled={!publishingReady} disabledReason={publishingDisabledReason(item)} />
       </section>
     </div>}
   </section>;
 }
 
-function ContentDetail({ item, onStatus, onRecordingMode, onScript, onConfirm, onHtmlStyle, onCoverStyle, onAssetState, onTask, onMetric, onMetadata, onDelete, onClose }: {
+function ContentDetail({ item, activeRun, onStatus, onRecordingMode, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual, onMetric, onMetadata, onDelete, onClose }: {
   item: ContentItem;
+  activeRun: BridgeRun | null;
   onStatus: (status: ContentStatus) => void;
   onRecordingMode: (mode: Exclude<RecordingMode, "未设置">) => void;
   onScript: (script: string) => void;
   onConfirm: () => void;
+  onGenerate: () => void;
+  onCancel: () => void;
+  onApplyVersion: (runId: string) => void;
   onHtmlStyle: (style: HtmlStyle) => void;
   onCoverStyle: (style: CoverStyle) => void;
-  onAssetState: (kind: "html" | "cover", state: AssetState) => void;
-  onTask: (kind: "content" | "html" | "cover") => void;
+  onGenerateVisual: (kind: "html" | "cover" | "publishing") => void;
+  onAcceptVisual: (kind: "html" | "cover" | "publishing") => void;
+  onContinueVisual: (kind: "html" | "cover" | "publishing", instruction: string) => void;
   onMetric: (platform: Platform, field: keyof Omit<Metric, "platform">, value: number) => void;
   onMetadata: (patch: Partial<Pick<ContentItem, "title" | "subtitle" | "publishedAt" | "publishLinks" | "archiveNotes" | "viewpoint">>) => void;
   onDelete: () => void;
@@ -1277,12 +1863,13 @@ function ContentDetail({ item, onStatus, onRecordingMode, onScript, onConfirm, o
 }) {
   const [tab, setTab] = useState<"brief" | "script" | "production" | "deliverables" | "data">("brief");
   const contentConfirmed = item.draftState === "已确认";
+  const publishingReady = missingPublishingAssets(item).length === 0;
   return <aside className="detail-panel">
     <div className="detail-heading"><span className="eyebrow">CONTENT DETAIL</span><div className="detail-heading-actions"><button className="detail-delete-button" onClick={onDelete}>删除内容</button><button className="icon-button" onClick={onClose} aria-label="关闭详情">×</button></div></div>
     <div className="detail-origin"><span className={`origin-badge ${item.origin === "历史归档" ? "archive" : ""}`}>{item.origin}</span>{item.publishedAt && <small>发布于 {item.publishedAt}</small>}</div>
     <h2>{item.title}</h2><p className="detail-subtitle">{item.subtitle}</p>
     <label className="status-select">当前状态<select value={item.status} onChange={(e) => onStatus(e.target.value as ContentStatus)}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-    <div className="asset-stage-strip"><span className={item.draftState === "已确认" ? "done" : "current"}>1 内容 {item.draftState}</span><i>→</i><span className={contentConfirmed ? "current" : "locked"}>2 视觉制作</span><i>→</i><span className={item.htmlState === "已生成" && item.coverState === "已生成" ? "done" : "locked"}>3 完成交付</span></div>
+    <div className="asset-stage-strip"><span className={item.draftState === "已确认" ? "done" : "current"}>1 内容 {item.draftState}</span><i>→</i><span className={publishingReady ? "done" : contentConfirmed ? "current" : "locked"}>2 视觉制作</span><i>→</i><span className={item.publishingState === "已生成" && item.publishingManifest ? "done" : publishingReady ? "current" : "locked"}>3 发布包交付</span></div>
     <div className="tabs five"><button className={tab === "brief" ? "active" : ""} onClick={() => setTab("brief")}>选题</button><button className={tab === "script" ? "active" : ""} onClick={() => setTab("script")}>内容稿</button><button className={tab === "production" ? "active" : ""} onClick={() => setTab("production")}>视觉制作</button><button className={tab === "deliverables" ? "active" : ""} onClick={() => setTab("deliverables")}>交付物</button><button className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}>数据</button></div>
     {tab === "brief" && (item.origin === "历史归档" ? <div className="detail-body archive-maintenance">
       <p className="archive-help">这条内容不是通过工作站创建的。可在这里持续补全历史资料，平台表现请到“数据”页维护。</p>
@@ -1294,20 +1881,22 @@ function ContentDetail({ item, onStatus, onRecordingMode, onScript, onConfirm, o
       <label>归档备注<textarea value={item.archiveNotes} onChange={(e) => onMetadata({ archiveNotes: e.target.value })} placeholder="选题背景、复盘判断、素材位置等" /></label>
     </div> : <div className="detail-body"><DetailBlock label="目标人群" text={item.audience} /><DetailBlock label="真实痛点" text={item.pain} /><DetailBlock label="核心观点" text={item.viewpoint} /><DetailBlock label="案例素材" text={item.cases} /></div>)}
     {tab === "script" && <div className="detail-body script-workspace">
-      <div className="script-head"><div><span>内容状态</span><strong className={`draft-state state-${item.draftState}`}>{item.draftState}</strong></div><small>在这里粘贴 Codex 返回内容，也可以直接修改。任何修改都会让已确认内容回到“编辑中”。</small></div>
-      <label className="content-editor-label">完整内容稿<textarea className="content-editor" value={item.script} onChange={(e) => onScript(e.target.value)} placeholder="把生成的 Markdown 内容稿粘贴到这里，继续删改和补充真实案例……" /></label>
-      <div className="script-actions"><span>{item.script.trim().length} 字符 · 本地自动保存</span><div><button className="secondary-button" onClick={() => onTask("content")}>{item.script.trim() ? "重新生成内容任务" : "生成内容任务"}</button><button className="primary-button" onClick={onConfirm} disabled={!item.script.trim() || contentConfirmed}>{contentConfirmed ? "内容已确认" : "确认内容，进入视觉制作 →"}</button></div></div>
+      <div className="script-head"><div><span>内容状态</span><strong className={`draft-state state-${item.draftState}`}>{item.draftState}</strong></div><small>Codex 会自动回填，你也可以直接修改。任何修改都会让已确认内容回到“编辑中”。</small></div>
+      <ContentGenerationPanel item={item} activeRun={activeRun} onGenerate={onGenerate} onCancel={onCancel} onApplyVersion={onApplyVersion} />
+      <label className="content-editor-label">完整内容稿<textarea className="content-editor" value={item.script} onChange={(e) => onScript(e.target.value)} placeholder="Codex 生成完成后会自动回填；你可以继续删改和补充真实案例……" /></label>
+      <div className="script-actions"><span>{item.script.trim().length} 字符 · 本地自动保存</span><div><button className="primary-button" onClick={onConfirm} disabled={!item.script.trim() || contentConfirmed}>{contentConfirmed ? "内容已确认" : "确认内容，进入视觉制作 →"}</button></div></div>
     </div>}
     {tab === "production" && <div className="detail-body">
       {!contentConfirmed && <div className="production-lock"><span>锁</span><div><strong>请先确认内容稿</strong><p>HTML 和封面会读取最终标题、结构与口播。内容未确认时生成，后续修改会造成重复返工。</p><button className="secondary-button" onClick={() => setTab("script")}>去编辑内容稿</button></div></div>}
       {contentConfirmed && <>
         <div className="production-mode-head"><span>{item.recordingMode === "未设置" ? "?" : recordingModeCopy[item.recordingMode].icon}</span><div><small>已确认内容 · 呈现方式</small><strong>{item.recordingMode}</strong></div></div>
         <label className="detail-mode-select">修改录制方式<select value={item.recordingMode} onChange={(e) => onRecordingMode(e.target.value as Exclude<RecordingMode, "未设置">)}><option value="未设置" disabled>请选择</option>{recordingModes.map((mode) => <option key={mode}>{mode}</option>)}</select></label>
-        <section className="asset-builder"><div className="asset-builder-head"><div><span>HTML 录屏页</span><h3>选择页面风格</h3></div><strong className={`asset-state asset-${item.htmlState}`}>{item.htmlState}</strong></div><div className="style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><div className="asset-actions"><button className="primary-button" onClick={() => { onAssetState("html", "待生成"); onTask("html"); }}>生成 HTML 任务指令</button>{item.htmlState !== "已生成" && <button className="secondary-button" onClick={() => onAssetState("html", "已生成")}>标记 HTML 已生成</button>}</div></section>
-        <section className="asset-builder"><div className="asset-builder-head"><div><span>三尺寸封面</span><h3>选择封面风格</h3></div><strong className={`asset-state asset-${item.coverState}`}>{item.coverState}</strong></div><div className="style-grid">{(Object.entries(coverStyles) as [CoverStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.coverStyle === style ? "selected" : ""} key={style} onClick={() => onCoverStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><div className="asset-actions"><button className="primary-button" onClick={() => { onAssetState("cover", "待生成"); onTask("cover"); }}>生成封面任务指令</button>{item.coverState !== "已生成" && <button className="secondary-button" onClick={() => onAssetState("cover", "已生成")}>标记封面已生成</button>}</div></section>
+        <section className="asset-builder"><div className="asset-builder-head"><div><span>HTML 录屏页</span><h3>选择页面风格</h3></div><strong className={`asset-state asset-${item.htmlState}`}>{item.htmlState}</strong></div><div className="style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><VisualGenerationPanel item={item} taskType="html" activeRun={activeRun} onGenerate={() => onGenerateVisual("html")} onCancel={onCancel} onAccept={() => onAcceptVisual("html")} onContinue={(instruction) => onContinueVisual("html", instruction)} /></section>
+        <section className="asset-builder"><div className="asset-builder-head"><div><span>三尺寸封面</span><h3>选择封面风格</h3></div><strong className={`asset-state asset-${item.coverState}`}>{item.coverState}</strong></div><div className="style-grid">{(Object.entries(coverStyles) as [CoverStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.coverStyle === style ? "selected" : ""} key={style} onClick={() => onCoverStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><VisualGenerationPanel item={item} taskType="cover" activeRun={activeRun} onGenerate={() => onGenerateVisual("cover")} onCancel={onCancel} onAccept={() => onAcceptVisual("cover")} onContinue={(instruction) => onContinueVisual("cover", instruction)} /></section>
+        <section className="asset-builder"><div className="asset-builder-head"><div><span>{publishingPackageLabel(item.platforms)}</span><h3>为 {selectedPlatformNames(item.platforms)} 生成、检查并下载 Markdown</h3></div><strong className={`asset-state asset-${item.publishingState}`}>{item.publishingState}</strong></div><VisualGenerationPanel item={item} taskType="publishing" activeRun={activeRun} onGenerate={() => onGenerateVisual("publishing")} onCancel={onCancel} onAccept={() => onAcceptVisual("publishing")} onContinue={(instruction) => onContinueVisual("publishing", instruction)} disabled={!publishingReady} disabledReason={publishingDisabledReason(item)} /></section>
       </>}
     </div>}
-    {tab === "deliverables" && <div className="detail-body"><div className="deliverable-status-grid"><article><span>内容稿</span><strong>{item.draftState}</strong><small>可查看、编辑并人工确认</small></article><article><span>HTML 页面</span><strong>{item.htmlState}</strong><small>{item.htmlStyle}</small></article><article><span>三尺寸封面</span><strong>{item.coverState}</strong><small>{item.coverStyle}</small></article></div><DetailBlock label="已确认内容摘要" text={item.script || "尚未回填内容稿。"} /><div className="cover-preview-row"><div className="cover-preview wide"><small>16:9 · {item.coverStyle}</small><strong>{item.title}</strong></div><div className="cover-preview square"><small>4:3 · {item.coverStyle}</small><strong>{item.title}</strong></div><div className="cover-preview portrait"><small>3:4 · {item.coverStyle}</small><strong>{item.title}</strong></div></div></div>}
+    {tab === "deliverables" && <div className="detail-body"><div className="deliverable-status-grid"><article><span>内容稿</span><strong>{item.draftState}</strong><small>可查看、编辑并人工确认</small></article><article><span>HTML 页面</span><strong>{item.htmlState}</strong><small>{item.htmlStyle}</small></article><article><span>三尺寸封面</span><strong>{item.coverState}</strong><small>{item.coverStyle}</small></article><article><span>{publishingPackageLabel(item.platforms)}</span><strong>{item.publishingState}</strong><small>{selectedPlatformNames(item.platforms)} · 验收后可下载</small></article></div><BundleExportPanel item={item} />{item.publishingManifest && item.publishingRunId && <ArtifactPreview runId={item.publishingRunId} manifest={item.publishingManifest} />}<DetailBlock label="已确认内容摘要" text={item.script || "尚未回填内容稿。"} /></div>}
     {tab === "data" && <div className="metric-editor"><p>发布后录入各平台数据，工作台会自动汇总。</p>{item.metrics.map((metric) => <fieldset key={metric.platform}><legend>{metric.platform}</legend><div>{(["views", "likes", "saves", "comments", "shares", "follows"] as const).map((field) => <label key={field}>{({ views: "播放", likes: "点赞", saves: "收藏", comments: "评论", shares: "转发", follows: "关注" })[field]}<input type="number" min="0" value={metric[field]} onChange={(e) => onMetric(metric.platform, field, Math.max(0, Number(e.target.value)))} /></label>)}</div></fieldset>)}</div>}
   </aside>;
 }
