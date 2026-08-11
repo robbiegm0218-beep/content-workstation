@@ -3,7 +3,7 @@
 > 版本：v1.0
 > 日期：2026-08-11
 > 目标：第一阶段只完成当前使用者电脑上的端到端闭环；个人版验收稳定后，再进入 GitHub 用户本地连接 Codex 的分发阶段。
-> 状态：A0～A8、B0～B1 已完成；GitHub 本地分发进入 B2（Fake Runner CI 与真实冒烟入口）
+> 状态：A0～A8、B0～B2 已完成；GitHub 本地分发进入 B3（隐私扫描与干净目录克隆验收）
 
 ## 0. 开发阶段与优先级
 
@@ -543,8 +543,8 @@ npm run dev:local
 |---|---|---|---|
 | C25 | [x] | 增加一键本地启动命令 | `npm run dev:local` 同时启动前端和 Bridge |
 | C26 | [x] | 编写首次使用引导 | 从安装 Codex、登录到生成第一条内容步骤完整 |
-| C27 | [ ] | 建立 Fake Runner 测试 | GitHub CI 不消耗 Codex 额度也能验证页面和 Bridge |
-| C28 | [ ] | 增加真实 Codex 冒烟测试 | 本地显式执行，验证 Skill、HTML 和封面关键链路 |
+| C27 | [x] | 建立 Fake Runner 测试 | GitHub CI 不消耗 Codex 额度也能验证页面和 Bridge |
+| C28 | [x] | 增加真实 Codex 冒烟测试 | 本地显式执行，验证 Skill、HTML 和封面关键链路 |
 | C29 | [ ] | 清理隐私与本机路径 | Git 扫描不包含个人内容、认证文件、密钥和绝对路径 |
 | C30 | [ ] | 新机器克隆验收 | 在第二个干净目录完成 clone → install → login → doctor → generate |
 | C31 | [ ] | 发布版本 | 构建、测试通过后推送 main，并创建本地直连版本标签 |
@@ -557,6 +557,16 @@ npm run dev:local
 - `npm run doctor` 默认输出面向用户的逐项结果和处理方式；传入 `-- --json` 时保留机器可读格式。
 - 真实进程验收确认一条命令可同时启动 3000 与 4317 服务；一次 Ctrl+C 后两个端口均释放。首次发现 Bridge 残留后已修正退出等待逻辑并复测通过。
 - ESLint、生产构建及 27 项自动测试通过。阶段结论：C25、C26 完成，可以进入 B2。
+
+#### B2 Fake Runner CI 与真实 Codex 冒烟入口验收（2026-08-11）
+
+- 新增 GitHub Actions 工作流，使用只读仓库权限和 Node.js 22，在 push/PR 上执行 `npm ci` 与 `npm run test:ci`。
+- CI 路径只运行现有 Fake Runner Bridge 集成测试，不安装 Codex、不读取登录状态、不调用图片生成，也不消耗真实 Codex 额度。
+- 新增统一 `npm run smoke:codex -- <scope> --yes` 入口，支持 `content`、`html`、`cover`、`bridge`、`cancel` 和 `full`；未提供 `--yes` 时以退出码 2 拒绝执行。
+- 真实入口执行前检查 Codex CLI 与 `codex login status`，错误时给出安装或登录命令；`cover/full` 在 README 中明确标注耗时与额度成本更高。
+- 本地以与 GitHub 相同的 `npm run test:ci` 完成 lint、生产构建和 28 项测试。工作流测试确认 CI 文件不包含任何真实冒烟命令。
+- 真实 `content` 冒烟成功，thread ID 为 `019ff0f3-2b46-7783-bf3a-3b500fd161ae`，获得 8 个 JSONL 事件、`CW-SKILL-1.0` 标记、3 个副标题候选和 9 个时间轴节点。
+- 阶段结论：C27、C28 完成，可以进入 B3 的隐私扫描与干净目录克隆验收。
 
 ## 12. 测试策略
 

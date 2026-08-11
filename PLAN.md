@@ -1,7 +1,7 @@
 # 内容工作站 MVP 开发计划
 
 > 更新时间：2026-08-11  
-> 当前阶段：GitHub 本地分发 B1 已完成；下一批执行 Fake Runner CI 与真实冒烟入口
+> 当前阶段：GitHub 本地分发 B2 已完成；下一批执行隐私扫描与干净目录克隆验收
 > 状态说明：`[x] 已完成`、`[~] 进行中`、`[ ] 待开始`
 
 > Codex 本地直连的完整可执行方案见 [CODEX_LOCAL_INTEGRATION_PLAN.md](./CODEX_LOCAL_INTEGRATION_PLAN.md)。个人本地版与真实内容全链路已经验收，下一阶段执行 GitHub 本地分发 C25～C31。暂不开发云端多用户能力。
@@ -89,6 +89,8 @@
 | T61 | [x] | 增加统一 Codex 任务中心 | 汇总角度、调研、内容、HTML、封面和发布包任务；支持实时状态、停止、历史错误与按原输入重试 |
 | T62 | [x] | 增加一键本地启动与联动停止 | `npm run dev:local` 同时管理网页与 Bridge；一次 Ctrl+C 后两个端口均释放且无残留进程 |
 | T63 | [x] | 增加首次使用向导 | 新用户按安装依赖、Codex 登录、连接检测和账号资料设置完成初始化；设置页可随时重新打开 |
+| T64 | [x] | 建立不消耗 Codex 额度的 GitHub CI | push 与 PR 自动执行 lint、构建及 Fake Runner 集成测试，不安装、不登录、不调用真实 Codex |
+| T65 | [x] | 收口真实 Codex 冒烟入口 | `npm run smoke:codex -- <范围> --yes` 支持内容、HTML、封面、Bridge、取消与完整验证；未显式确认时拒绝执行 |
 
 ## 4. 核心数据对象
 
@@ -110,7 +112,7 @@
 
 ## 6. 下一阶段候选
 
-1. 继续 GitHub 本地分发：增加不消耗 Codex 额度的 CI、真实冒烟入口、隐私扫描和干净目录克隆验收。
+1. 继续 GitHub 本地分发：增加隐私扫描，并在干净目录完成 clone → install → doctor → start 验收。
 2. 按后续反馈继续优化封面风格、标题排版和人物素材策略。
 3. 支持 CSV / Excel 批量导入运营数据，并根据历史数据沉淀高表现选题、开头、结构和封面模板。
 
@@ -132,6 +134,8 @@
 - `npm run doctor` 已以面向普通用户的格式通过 9 项环境检查；JSON 输出仍可通过 `-- --json` 获取。
 - `npm run dev:local` 已完成两轮真实进程验收：网页与 Bridge 同时启动，一次 Ctrl+C 后 3000/4317 两个端口均释放。
 - 首次使用向导已加入页面与设置入口，覆盖依赖安装、Codex 安装/登录/状态检查和六项账号背景信息。
+- GitHub Actions 已配置只读权限、Node.js 22、15 分钟超时及 `npm run test:ci`；本地以同一命令通过 28 项测试。
+- 真实 Codex `content` 冒烟通过：返回 thread ID、8 个事件、`CW-SKILL-1.0` 标记、3 个副标题候选和 9 个时间轴节点。
 - 当前数据模式：Bridge 的 `.data/workstation-state.json` 为主存储，浏览器 `localStorage` 作为兜底，并支持 JSON 导入与导出。
 - 旧数据兼容：已有内容自动补充“未设置”录制方式，不覆盖原稿件、状态和运营数据。
 

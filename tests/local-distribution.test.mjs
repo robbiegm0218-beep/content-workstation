@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 test("local distribution exposes a single startup command and first-run documentation", async () => {
@@ -18,4 +20,25 @@ test("local distribution exposes a single startup command and first-run document
   assert.match(readme, /codex login/);
   assert.match(readme, /npm run doctor/);
   assert.match(readme, /npm run dev:local/);
+});
+
+test("CI uses Fake Runner tests and real Codex smoke tests require explicit confirmation", async () => {
+  const projectRoot = path.resolve(import.meta.dirname, "..");
+  const [packageJson, workflow] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8").then(JSON.parse),
+    readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"),
+  ]);
+
+  assert.equal(packageJson.scripts["test:ci"], "npm run lint && npm test");
+  assert.equal(packageJson.scripts["smoke:codex"], "node scripts/smoke-codex-local.mjs");
+  assert.match(workflow, /npm run test:ci/);
+  assert.doesNotMatch(workflow, /smoke:codex|test:codex/);
+
+  const help = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /必须显式添加 --yes/);
+
+  const unconfirmed = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "content"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(unconfirmed.status, 2);
+  assert.match(unconfirmed.stderr, /尚未执行/);
 });

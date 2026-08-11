@@ -67,6 +67,20 @@ npm run lint
 npm test
 ```
 
+GitHub Actions 运行 `npm run test:ci`，其中 Bridge 集成测试使用 Fake Runner，不要求安装或登录 Codex，也不会消耗 Codex 额度。
+
+需要在本机验证真实 Codex 时，必须明确选择范围并添加 `--yes`：
+
+```bash
+npm run smoke:codex -- content --yes
+npm run smoke:codex -- html --yes
+npm run smoke:codex -- cover --yes
+# 或依次执行以上三项
+npm run smoke:codex -- full --yes
+```
+
+`cover` 和 `full` 可能调用图片生成，耗时及额度消耗高于内容稿与 HTML。使用 `npm run smoke:codex -- --help` 可查看全部范围；真实冒烟测试不会进入 GitHub CI。
+
 ## 数据与模型配置
 
 - 内容、案例、设置和生产状态优先保存在本机 Bridge 的 `.data/workstation-state.json`，浏览器 `localStorage` 作为兜底；请定期从设置页导出 JSON 备份。
