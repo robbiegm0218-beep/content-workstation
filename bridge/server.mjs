@@ -100,7 +100,7 @@ export async function createBridgeRuntime(options = {}) {
       assertBearerToken(request, token);
 
       if (request.method === "POST" && url.pathname === "/v1/doctor") {
-        sendJson(response, 200, await (options.doctor ?? runDoctor)(config, { bridgeIsListening: true }), origin);
+        sendJson(response, 200, await (options.doctor ?? runDoctor)(config, { bridgeIsListening: true, webIsListening: true }), origin);
         return;
       }
 
@@ -153,6 +153,13 @@ export async function createBridgeRuntime(options = {}) {
       if (request.method === "POST" && cancelMatch) {
         const record = await taskManager.cancelRun(cancelMatch[0]);
         sendJson(response, 200, { run: publicRun(record) }, origin);
+        return;
+      }
+
+      const retryMatch = matchPath(url.pathname, /^\/v1\/runs\/([^/]+)\/retry$/);
+      if (request.method === "POST" && retryMatch) {
+        const record = await taskManager.retryRun(retryMatch[0]);
+        sendJson(response, 202, { run: publicRun(record) }, origin);
         return;
       }
 

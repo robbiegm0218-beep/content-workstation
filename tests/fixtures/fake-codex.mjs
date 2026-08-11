@@ -1,4 +1,9 @@
+import { writeFile } from "node:fs/promises";
+
 const shouldFail = process.env.FAKE_CODEX_EXIT === "2";
+if (process.env.FAKE_CODEX_ARGS_PATH) {
+  await writeFile(process.env.FAKE_CODEX_ARGS_PATH, JSON.stringify(process.argv.slice(2)));
+}
 
 process.stdout.write(`${JSON.stringify({ type: "thread.started", thread_id: "thread-test-001" })}\n`);
 if (shouldFail) {

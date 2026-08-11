@@ -5,7 +5,7 @@ export type BridgeRunStatus = "queued" | "running" | "completed" | "failed" | "c
 export type BridgeRun = {
   runId: string;
   contentId: string;
-  taskType: "angles" | "content" | "html" | "cover" | "publishing";
+  taskType: "research" | "angles" | "content" | "html" | "cover" | "publishing";
   contentVersion: number;
   status: BridgeRunStatus;
   threadId: string | null;
@@ -13,6 +13,8 @@ export type BridgeRun = {
   startedAt: string | null;
   completedAt: string | null;
   error: { code: string; message: string } | null;
+  parentRunId?: string;
+  updatedAt?: string;
 };
 
 export type ContentResult = {
@@ -37,6 +39,35 @@ export type TopicAnglesResult = {
     audiencePain: string;
     contentValue: string;
     evidenceNeeded: string;
+  }>;
+};
+
+export type TopicResearchResult = {
+  generationMeta: { skillName: string; skillEvidence: string; researchUsed: boolean };
+  summary: string;
+  platformFindings: Array<{
+    platform: string;
+    accessibility: string;
+    samples: Array<{ title: string; author: string; publishedAt: string; visibleMetrics: string; url: string; angle: string }>;
+    limitations: string;
+  }>;
+  commonAngles: string[];
+  contentGaps: string[];
+  recommendedAngles: TopicAnglesResult["angles"];
+  recommendedAngleIndex: number;
+  manualFollowups: string[];
+  limitations: string[];
+};
+
+export type DoctorReport = {
+  overall: "pass" | "warn" | "fail";
+  checkedAt: string;
+  checks: Array<{
+    id: string;
+    status: "pass" | "warn" | "fail";
+    message: string;
+    fix: string | null;
+    details: unknown;
   }>;
 };
 
@@ -92,6 +123,13 @@ export async function listBridgeRuns() {
   return readJson<{ runs: BridgeRun[] }>(await authorizedFetch("/v1/runs"));
 }
 
+export async function runBridgeDoctor() {
+  return readJson<DoctorReport>(await authorizedFetch("/v1/doctor", {
+    method: "POST",
+    body: "{}",
+  }));
+}
+
 export async function getWorkstationState<T>() {
   return readJson<{ state: { version: "1.0"; updatedAt: string; database: T } | null }>(await authorizedFetch("/v1/workstation-state"));
 }
@@ -129,6 +167,19 @@ export async function createTopicAnglesRun(input: {
   }));
 }
 
+export async function createTopicResearchRun(input: {
+  contentId: string;
+  contentVersion: number;
+  instruction?: string;
+  creatorContext: Record<string, unknown>;
+  contentBrief: Record<string, unknown>;
+}) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch("/v1/runs", {
+    method: "POST",
+    body: JSON.stringify({ ...input, taskType: "research" }),
+  }));
+}
+
 export async function createVisualRun(input: {
   contentId: string;
   taskType: "html" | "cover" | "publishing";
@@ -161,12 +212,23 @@ export async function cancelBridgeRun(runId: string) {
   }));
 }
 
+export async function retryBridgeRun(runId: string) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch(`/v1/runs/${encodeURIComponent(runId)}/retry`, {
+    method: "POST",
+    body: "{}",
+  }));
+}
+
 export async function getContentResult(runId: string) {
   return readJson<ContentResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/content-result`));
 }
 
 export async function getTopicAnglesResult(runId: string) {
   return readJson<TopicAnglesResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/topic-angles-result`));
+}
+
+export async function getTopicResearchResult(runId: string) {
+  return readJson<TopicResearchResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/topic-research-result`));
 }
 
 export async function getArtifactManifest(runId: string) {

@@ -95,7 +95,7 @@ export function validateCreateRunInput(input) {
     }
   }
   if (!SUPPORTED_TASK_TYPES.has(input.taskType)) {
-    throw new HttpError(400, "UNSUPPORTED_TASK_TYPE", "taskType must be angles, content, html, cover, or publishing");
+    throw new HttpError(400, "UNSUPPORTED_TASK_TYPE", "taskType must be research, angles, content, html, cover, or publishing");
   }
   if (typeof input.contentId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(input.contentId)) {
     throw new HttpError(400, "INVALID_CONTENT_ID", "contentId contains unsupported characters");
@@ -107,7 +107,7 @@ export function validateCreateRunInput(input) {
     throw new HttpError(400, "INVALID_INSTRUCTION", "instruction must be at most 5000 characters");
   }
 
-  if (input.taskType === "angles" || input.taskType === "content") {
+  if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content") {
     assertPlainObject(input.creatorContext, "creatorContext");
     assertPlainObject(input.contentBrief, "contentBrief");
   } else {

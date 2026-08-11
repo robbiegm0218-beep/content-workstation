@@ -57,6 +57,23 @@ test("topic angle tasks use creator context and a content brief", () => {
   );
 });
 
+test("topic research tasks use the same bounded structured input", () => {
+  assert.doesNotThrow(() => validateCreateRunInput({
+    ...contentInput,
+    contentId: "research-001",
+    taskType: "research"
+  }));
+  assert.throws(
+    () => validateCreateRunInput({
+      contentId: "research-001",
+      taskType: "research",
+      contentVersion: 1,
+      contentBrief: {}
+    }),
+    /creatorContext must be an object/
+  );
+});
+
 test("Codex receives a minimal environment without unrelated secrets", () => {
   const environment = createMinimalCodexEnvironment({
     PATH: "/bin",

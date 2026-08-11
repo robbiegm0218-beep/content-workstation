@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -44,6 +44,10 @@ export class WorkspaceManager {
       path.join(workspace, "schemas/topic-angles.schema.json")
     );
     await cp(
+      path.join(this.config.projectRoot, "schemas/topic-research.schema.json"),
+      path.join(workspace, "schemas/topic-research.schema.json")
+    );
+    await cp(
       path.join(this.config.projectRoot, "schemas/artifact-manifest.schema.json"),
       path.join(workspace, "schemas/artifact-manifest.schema.json")
     );
@@ -58,7 +62,7 @@ export class WorkspaceManager {
     };
     await writeFile(path.join(workspace, "input/task.json"), `${JSON.stringify(taskSnapshot, null, 2)}\n`, { mode: 0o600 });
 
-    if (input.taskType === "angles" || input.taskType === "content") {
+    if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content") {
       await writeFile(
         path.join(workspace, "input/creator-context.json"),
         `${JSON.stringify(input.creatorContext, null, 2)}\n`,
@@ -80,5 +84,30 @@ export class WorkspaceManager {
 
     await execFileAsync("git", ["init", "--quiet"], { cwd: workspace });
     return workspace;
+  }
+
+  async readInput(record) {
+    const workspace = path.resolve(record.workspace);
+    const root = path.resolve(this.config.workRoot);
+    if (!workspace.startsWith(`${root}${path.sep}`)) throw new Error("Workspace escaped work root");
+    const task = JSON.parse(await readFile(path.join(workspace, "input/task.json"), "utf8"));
+    const base = {
+      contentId: record.contentId,
+      taskType: record.taskType,
+      contentVersion: record.contentVersion,
+      instruction: task.instruction ?? "",
+      creatorContext: null,
+      contentBrief: null,
+      confirmedContent: null,
+      styleConfig: null
+    };
+    if (record.taskType === "research" || record.taskType === "angles" || record.taskType === "content") {
+      base.creatorContext = JSON.parse(await readFile(path.join(workspace, "input/creator-context.json"), "utf8"));
+      base.contentBrief = JSON.parse(await readFile(path.join(workspace, "input/content-brief.json"), "utf8"));
+    } else {
+      base.confirmedContent = await readFile(path.join(workspace, "input/confirmed-content.md"), "utf8");
+      base.styleConfig = JSON.parse(await readFile(path.join(workspace, "input/style-config.json"), "utf8"));
+    }
+    return base;
   }
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -32,6 +32,23 @@ test("runner reports successful completion", async () => {
   assert.equal(result.code, 0);
   assert.equal(result.threadId, "thread-test-001");
   assert.equal(result.lastAgentMessage, '{"ok":true}');
+});
+
+test("runner enables Codex web search before the exec subcommand", async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), "content-workstation-runner-"));
+  const argsPath = path.join(cwd, "args.json");
+  await runCodex({
+    prompt: "fixture",
+    cwd,
+    codexCommand: process.execPath,
+    commandPrefixArgs: [fakeCodex],
+    outputPath: null,
+    search: true,
+    env: { ...process.env, FAKE_CODEX_ARGS_PATH: argsPath }
+  });
+  const args = JSON.parse(await readFile(argsPath, "utf8"));
+  assert.ok(args.indexOf("--search") >= 0);
+  assert.ok(args.indexOf("--search") < args.indexOf("exec"));
 });
 
 test("runner preserves JSONL context for failed completion", async () => {

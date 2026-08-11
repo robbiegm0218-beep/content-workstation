@@ -78,7 +78,8 @@ export async function runCodex({
   signal,
   timeoutMs = 0,
   forceKillAfterMs = 2_000,
-  resumeThreadId = null
+  resumeThreadId = null,
+  search = false
 }) {
   if (!prompt?.trim()) throw new TypeError("prompt is required");
   if (!cwd) throw new TypeError("cwd is required");
@@ -92,13 +93,16 @@ export async function runCodex({
   if (resolvedOutput) await mkdir(path.dirname(resolvedOutput), { recursive: true });
 
   const args = [
-    ...commandPrefixArgs,
+    ...commandPrefixArgs
+  ];
+  if (search) args.push("--search");
+  args.push(
     "exec",
     "--sandbox",
     sandbox,
     "-C",
     resolvedCwd
-  ];
+  );
   if (resumeThreadId) args.push("resume");
   args.push("--json");
   if (ephemeral) args.push("--ephemeral");

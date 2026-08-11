@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCodex, CodexRunError } from "./codex-runner.mjs";
 import { HttpError, createMinimalCodexEnvironment } from "./security.mjs";
+import { TERMINAL_RUN_STATUSES } from "./config.mjs";
 import { createTaskSpecification, finalizeTaskResult } from "./task-definition.mjs";
 
 export class TaskManager {
@@ -135,6 +136,19 @@ export class TaskManager {
     activeRun.controller.abort();
     await activeRun.promise;
     return this.get(runId);
+  }
+
+  async retryRun(parentRunId) {
+    if (this.active.size >= this.config.maxConcurrentRuns) {
+      throw new HttpError(409, "RUN_LIMIT_REACHED", "Another Codex task is already running");
+    }
+    const parent = this.get(parentRunId);
+    if (!parent) throw new HttpError(404, "RUN_NOT_FOUND", "Run not found");
+    if (!TERMINAL_RUN_STATUSES.has(parent.status)) {
+      throw new HttpError(409, "RUN_NOT_RETRYABLE", "Only a finished task can be retried");
+    }
+    const input = await this.workspaceManager.readInput(parent);
+    return this.createRun(input);
   }
 
   async subscribe(runId, listener) {

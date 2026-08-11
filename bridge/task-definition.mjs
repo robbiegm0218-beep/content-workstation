@@ -6,6 +6,26 @@ import { validateArtifactManifest } from "./artifact-validator.mjs";
 export function createTaskSpecification(input, workspace, timeoutMs) {
   const taskPath = path.join(workspace, "input/task.json");
 
+  if (input.taskType === "research") {
+    return {
+      prompt: [
+        "请使用 $content-workstation-creator Skill 执行联网选题调研。",
+        `账号资料：${path.join(workspace, "input/creator-context.json")}`,
+        `议题简报：${path.join(workspace, "input/content-brief.json")}`,
+        `任务补充要求：${taskPath}`,
+        "必须使用搜索能力核验公开可访问的信息。每条样本必须带可访问 URL；无法访问的平台明确写入限制和人工补充项。",
+        "不得虚构标题、作者、发布时间、互动数据、平台热度或搜索覆盖范围。只总结本次实际找到的样本。",
+        "本轮只生成调研结果和三个建议切口，不生成完整内容稿、HTML、封面或发布包。",
+        "最终只输出符合指定 JSON Schema 的 JSON。"
+      ].join("\n"),
+      sandbox: "read-only",
+      search: true,
+      schemaPath: path.join(workspace, "schemas/topic-research.schema.json"),
+      outputPath: path.join(workspace, "output/topic-research.json"),
+      timeoutMs
+    };
+  }
+
   if (input.taskType === "angles") {
     return {
       prompt: [
@@ -84,21 +104,22 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
 }
 
 export async function finalizeTaskResult(input, workspace, structuredResult) {
-  if (input.taskType === "angles" || input.taskType === "content") {
+  if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content") {
     if (structuredResult.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
       throw new Error(`${input.taskType} result is missing repository Skill evidence`);
     }
+    const isResearch = input.taskType === "research";
     const isAngles = input.taskType === "angles";
-    const artifactPath = path.join(workspace, isAngles ? "output/topic-angles.json" : "output/content-result.json");
+    const artifactPath = path.join(workspace, isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : "output/content-result.json");
     const buffer = await readFile(artifactPath);
     return {
       manifestVersion: "1.0",
       taskType: input.taskType,
       generationMode: "codex-structured",
       artifacts: [{
-        id: isAngles ? "topic-angles-result" : "content-result",
-        type: isAngles ? "topic-angles-json" : "content-json",
-        path: isAngles ? "output/topic-angles.json" : "output/content-result.json",
+        id: isResearch ? "topic-research-result" : isAngles ? "topic-angles-result" : "content-result",
+        type: isResearch ? "topic-research-json" : isAngles ? "topic-angles-json" : "content-json",
+        path: isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : "output/content-result.json",
         mimeType: "application/json",
         width: null,
         height: null,

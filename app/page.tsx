@@ -8,6 +8,7 @@ import {
   continueBridgeRun,
   createContentRun,
   createTopicAnglesRun,
+  createTopicResearchRun,
   createVisualRun,
   getArtifactBlob,
   getArtifactManifest,
@@ -15,13 +16,16 @@ import {
   getContentBundle,
   getContentResult,
   getTopicAnglesResult,
+  getTopicResearchResult,
   getWorkstationState,
   listBridgeRuns,
+  retryBridgeRun,
+  runBridgeDoctor,
   saveWorkstationState,
 } from "./lib/local-bridge";
-import type { ArtifactManifest, BridgeRun, BridgeRunStatus } from "./lib/local-bridge";
+import type { ArtifactManifest, BridgeRun, BridgeRunStatus, DoctorReport, TopicResearchResult } from "./lib/local-bridge";
 
-type View = "dashboard" | "create" | "library" | "cases" | "review" | "settings";
+type View = "dashboard" | "create" | "library" | "cases" | "review" | "tasks" | "settings";
 type ContentStatus = "选题草稿" | "待生成" | "已生成" | "待录制" | "已录制" | "已发布" | "已复盘";
 type Platform = "B站" | "小红书" | "视频号" | "抖音";
 type RecordingMode = "出镜口播" | "HTML录屏" | "混合录制" | "未设置";
@@ -331,6 +335,7 @@ const navItems: { id: View; label: string; icon: string; eyebrow: string }[] = [
   { id: "library", label: "内容库", icon: "▤", eyebrow: "CONTENT" },
   { id: "cases", label: "素材与案例", icon: "◇", eyebrow: "MATERIAL" },
   { id: "review", label: "数据复盘", icon: "↗", eyebrow: "INSIGHT" },
+  { id: "tasks", label: "任务中心", icon: "◌", eyebrow: "CODEX" },
   { id: "settings", label: "账号设置", icon: "◎", eyebrow: "PROFILE" },
 ];
 
@@ -340,6 +345,7 @@ const viewCopy: Record<View, { eyebrow: string; title: string; description: stri
   library: { eyebrow: "CONTENT LIBRARY", title: "每条内容都应该留下资产", description: "统一管理选题、稿件、封面、状态和发布结果。" },
   cases: { eyebrow: "EXPERIENCE BANK", title: "把十年经历，变成可复用的表达素材", description: "好的案例不是简历描述，而是观点成立的证据。" },
   review: { eyebrow: "PERFORMANCE REVIEW", title: "不只看播放，还要看内容带来了什么", description: "用收藏、关注和互动判断专业内容是否真的有用。" },
+  tasks: { eyebrow: "CODEX TASK CENTER", title: "每个生成任务，都能找得到", description: "统一查看运行状态、错误原因、历史结果，并停止或按原输入重试。" },
   settings: { eyebrow: "ACCOUNT CONTEXT", title: "让每次生成，都更像你", description: "维护稳定的个人背景、受众、风格与内容目标。" },
 };
 
@@ -362,6 +368,9 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [form, setForm] = useState<ContentForm>(initialForm);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [researchError, setResearchError] = useState("");
+  const [researchResult, setResearchResult] = useState<TopicResearchResult | null>(null);
   const [scoutTopic, setScoutTopic] = useState("");
   const [topicAngles, setTopicAngles] = useState<TopicAngle[]>([]);
   const [anglesLoading, setAnglesLoading] = useState(false);
@@ -375,6 +384,10 @@ export default function Home() {
   const [historyForm, setHistoryForm] = useState<HistoryForm>(initialHistoryForm);
   const [caseDraft, setCaseDraft] = useState({ title: "", industry: "", background: "", result: "" });
   const [bridgeState, setBridgeState] = useState<"checking" | "connected" | "offline">("checking");
+  const [bridgeInfo, setBridgeInfo] = useState<{ version: string; activeRuns: number } | null>(null);
+  const [bridgeRuns, setBridgeRuns] = useState<BridgeRun[]>([]);
+  const [doctorReport, setDoctorReport] = useState<DoctorReport | null>(null);
+  const [doctorLoading, setDoctorLoading] = useState(false);
   const [activeRun, setActiveRun] = useState<BridgeRun | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const pollingRuns = useRef(new Set<string>());
@@ -464,11 +477,6 @@ export default function Home() {
   const priorityStages = useMemo(() => priorityContent ? productionStagesFor(priorityContent) : [], [priorityContent]);
   const completedPriorityStages = priorityStages.filter((stage) => stage.done).length;
   const priorityNext = priorityStages.find((stage) => !stage.done) ?? null;
-
-  const researchPrompt = useMemo(() => {
-    const topic = scoutTopic.trim() || "（请填写议题）";
-    return `请使用 product-manager-content-creator Skill，并联网调研“${topic}”在 B站、小红书、视频号中的相似内容，帮助我判断是否值得做成一期视频。\n\n【我的账号】\n- 身份：${db.settings.role}\n- 目标受众：${db.settings.audience}\n- 内容风格：${db.settings.style}\n\n【调研要求】\n1. 每个平台寻找 5～10 条高度相关内容，记录标题、发布时间、作者、可见互动数据、链接和内容角度。\n2. 优先近 12 个月内容；如果平台内容无法公开访问，明确写“需要人工补充”，不要虚构标题或数据。\n3. 分析高频标题表达、受众正在追问的问题、已经被讲烂的角度，以及仍有空间的内容缺口。\n4. 不要只按播放量排序，还要判断哪些内容更可能带来收藏、讨论和专业关注。\n5. 结合我的实战型产品负责人定位，给出 3 个差异化选题角度。每个角度包含：目标人群痛点、核心冲突、我的独特视角、推荐标题、需要补充的亲身案例。\n6. 最后明确推荐一个角度，并说明为什么它比直接讲“${topic}是什么”更值得做。`;
-  }, [db.settings, scoutTopic]);
 
   function updateForm<K extends keyof ContentForm>(key: K, value: ContentForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -622,16 +630,42 @@ export default function Home() {
     });
   }
 
+  async function refreshBridgeRuns() {
+    const { runs } = await listBridgeRuns();
+    setBridgeRuns(runs);
+    return runs;
+  }
+
+  async function checkCodexConnection() {
+    setDoctorLoading(true);
+    setBridgeState("checking");
+    try {
+      const health = await connectLocalBridge();
+      setBridgeInfo({ version: health.version, activeRuns: health.activeRuns });
+      setBridgeState("connected");
+      const [report] = await Promise.all([runBridgeDoctor(), refreshBridgeRuns()]);
+      setDoctorReport(report);
+    } catch (error) {
+      setBridgeState("offline");
+      setDoctorReport(null);
+      setNotice(error instanceof Error ? error.message : "无法连接本机 Codex Bridge。");
+    } finally {
+      setDoctorLoading(false);
+    }
+  }
+
   async function reconnectBridge(recoverRuns = false) {
     setBridgeState("checking");
     try {
-      await connectLocalBridge();
+      const health = await connectLocalBridge();
+      setBridgeInfo({ version: health.version, activeRuns: health.activeRuns });
       setBridgeState("connected");
+      const runs = await refreshBridgeRuns();
       if (!recoverRuns) return;
-      const { runs } = await listBridgeRuns();
       const recoverable = runs.find((run) => run.status === "queued" || run.status === "running");
       if (recoverable) {
-        if (recoverable.taskType === "angles") void pollTopicAnglesRun(recoverable);
+        if (recoverable.taskType === "research") void pollTopicResearchRun(recoverable);
+        else if (recoverable.taskType === "angles") void pollTopicAnglesRun(recoverable);
         else if (recoverable.taskType === "content") void pollContentRun(recoverable);
         else void pollVisualRun(recoverable);
         return;
@@ -929,9 +963,28 @@ export default function Home() {
     try {
       const { run } = await cancelBridgeRun(activeRun.runId);
       setActiveRun(run);
+      setBridgeRuns((current) => [run, ...current.filter((item) => item.runId !== run.runId)]);
       setNotice("正在停止 Codex 任务……");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "停止任务失败。 ");
+    }
+  }
+
+  async function retryTask(runId: string) {
+    if (activeRun) {
+      setNotice("当前已有 Codex 任务运行，请等待完成或先停止。");
+      return;
+    }
+    try {
+      const { run } = await retryBridgeRun(runId);
+      setBridgeRuns((current) => [run, ...current.filter((item) => item.runId !== run.runId)]);
+      setNotice("已按原始输入重新提交任务。");
+      if (run.taskType === "research") await pollTopicResearchRun(run);
+      else if (run.taskType === "angles") await pollTopicAnglesRun(run);
+      else if (run.taskType === "content") await pollContentRun(run);
+      else await pollVisualRun(run);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重新执行任务失败。");
     }
   }
 
@@ -976,12 +1029,91 @@ export default function Home() {
     setNotice("已切换到所选内容版本，请检查后重新确认。 ");
   }
 
-  async function copyResearchTask() {
+  async function startTopicResearch() {
+    const topic = scoutTopic.trim();
+    setResearchOpen(true);
+    if (!topic) {
+      setResearchError("请先输入一个具体议题。");
+      return;
+    }
+    if (activeRun) {
+      setResearchError("当前已有 Codex 任务运行，请等待完成或先停止。");
+      return;
+    }
+    setResearchLoading(true);
+    setResearchError("");
+    setResearchResult(null);
+    let bridgeConnected = false;
     try {
-      await navigator.clipboard.writeText(researchPrompt);
-      setNotice("选题调研指令已复制，可以交给 Codex 联网分析。");
-    } catch {
-      setNotice("复制失败，请在调研面板中手动选择文本。");
+      const health = await connectLocalBridge();
+      bridgeConnected = true;
+      setBridgeInfo({ version: health.version, activeRuns: health.activeRuns });
+      setBridgeState("connected");
+      const { run } = await createTopicResearchRun({
+        contentId: uid("research"),
+        contentVersion: 1,
+        creatorContext: {
+          name: db.settings.name,
+          role: db.settings.role,
+          experience: db.settings.experience,
+          audience: db.settings.audience,
+          voice: db.settings.style,
+          goal: db.settings.goal,
+          cases: db.cases.slice(0, 8),
+        },
+        contentBrief: {
+          topic,
+          platforms: ["B站", "小红书", "视频号"],
+          recency: "优先近12个月",
+          sampleTarget: "每个平台最多10条；只记录实际找到且可核验的样本",
+          purpose: "识别常见角度、内容空白，并推荐三个适合当前账号的切口",
+        },
+      });
+      setBridgeRuns((current) => [run, ...current.filter((item) => item.runId !== run.runId)]);
+      setNotice("Codex 已开始联网调研，完成后会自动展示来源和建议切口。");
+      await pollTopicResearchRun(run);
+    } catch (error) {
+      if (!bridgeConnected) setBridgeState("offline");
+      setResearchError(error instanceof Error ? error.message : "联网调研任务启动失败。");
+      setResearchLoading(false);
+    }
+  }
+
+  async function pollTopicResearchRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setResearchOpen(true);
+    setResearchLoading(true);
+    setResearchError("");
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        setBridgeRuns((current) => [run, ...current.filter((item) => item.runId !== run.runId)]);
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const result = await getTopicResearchResult(run.runId);
+        setResearchResult(result);
+        setTopicAngles(result.recommendedAngles);
+        setNotice("联网调研完成，已整理来源、内容空白和三个建议切口。");
+      } else {
+        const message = run.status === "cancelled" ? "联网调研已停止。" : run.error?.message || "联网调研未完成，请重试。";
+        setResearchError(message);
+        setNotice(message);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "读取联网调研结果失败。";
+      setResearchError(message);
+      setNotice(message);
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setResearchLoading(false);
+      setActiveRun((currentRun) => currentRun?.runId === initialRun.runId ? null : currentRun);
+      void refreshBridgeRuns().catch(() => {});
     }
   }
 
@@ -1365,6 +1497,8 @@ export default function Home() {
   function navigate(next: View) {
     setView(next);
     setSelectedId(null);
+    if (next === "tasks") void refreshBridgeRuns().catch(() => setBridgeState("offline"));
+    if (next === "settings") void checkCodexConnection();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1467,7 +1601,7 @@ export default function Home() {
                     <a className={`platform-search ${!scoutTopic.trim() ? "disabled" : ""}`} href={scoutTopic.trim() ? `https://search.bilibili.com/all?keyword=${encodeURIComponent(scoutTopic.trim())}` : undefined} target="_blank" rel="noreferrer"><strong>B</strong><span>查 B站<small>打开关键词搜索</small></span></a>
                     <a className={`platform-search red ${!scoutTopic.trim() ? "disabled" : ""}`} href={scoutTopic.trim() ? `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(scoutTopic.trim())}` : undefined} target="_blank" rel="noreferrer"><strong>RED</strong><span>查小红书<small>可能需要登录</small></span></a>
                     <button className="platform-search green" onClick={copyForWechat} disabled={!scoutTopic.trim()}><strong>微</strong><span>查视频号<small>复制词去搜一搜</small></span></button>
-                    <button className="platform-search codex" onClick={() => setResearchOpen(true)} disabled={!scoutTopic.trim()}><strong>✦</strong><span>交给 Codex<small>联网归纳同类选题</small></span></button>
+                    <button className="platform-search codex" onClick={() => void startTopicResearch()} disabled={!scoutTopic.trim() || researchLoading}><strong>✦</strong><span>{researchLoading ? "Codex 调研中" : "交给 Codex"}<small>{researchLoading ? "可打开查看实时状态" : "联网归纳同类选题"}</small></span></button>
                   </div>
                   <ol className="scout-flow" aria-label="选题调研下一步">
                     <li className={scoutTopic.trim() ? "done" : "current"}><span>1</span><p><strong>输入议题</strong><small>先写你想研究的问题</small></p></li>
@@ -1479,7 +1613,7 @@ export default function Home() {
                 {anglesLoading && <TopicAngleGenerationStatus run={activeRun?.taskType === "angles" ? activeRun : null} onCancel={() => void stopActiveRun()} />}
                 {anglesError && <div className="angle-error"><strong>暂时无法生成</strong><p>{anglesError}</p><small>请确认设置页显示“Codex 已连接”，并确保当前没有其他 Codex 任务运行。</small></div>}
                 {topicAngles.length > 0 && <div className="angle-results"><div className="angle-title"><strong>本机 Codex 生成的 3 个切入角度</strong><span>基于当前议题、账号资料与案例库</span></div><div className="angle-grid dynamic">{topicAngles.map((angle) => <article key={`${angle.type}-${angle.title}`}><span>{angle.type}</span><h3>{angle.title}</h3><p>{angle.viewpoint}</p><dl><div><dt>受众痛点</dt><dd>{angle.audiencePain}</dd></div><div><dt>内容价值</dt><dd>{angle.contentValue}</dd></div><div><dt>需要证据</dt><dd>{angle.evidenceNeeded}</dd></div></dl><button onClick={() => applyAngle(angle)}>用这个角度写 →</button></article>)}</div></div>}
-                <div className="feasibility-note"><strong>当前能力边界</strong><p>三个角度由本机 Codex 结合议题、账号资料和案例库实时生成，不再需要 DeepSeek 或 OpenAI API Key。B站、小红书和视频号的真实平台样本仍通过上方入口查看；Codex 不会虚构平台热度或互动数据。</p></div>
+                <div className="feasibility-note"><strong>当前能力边界</strong><p>三个角度由本机 Codex 结合议题、账号资料和案例库实时生成，不再需要 DeepSeek 或 OpenAI API Key。联网调研只保留实际找到且可核验的公开来源；需要登录或无法访问的平台会明确留空，并给出人工补充步骤。</p></div>
               </div>
 
               <div className="form-section" id="content-brief">
@@ -1653,6 +1787,8 @@ export default function Home() {
           </section>
         )}
 
+        {view === "tasks" && <TaskCenter runs={bridgeRuns} activeRun={activeRun} contents={db.contents} onRefresh={() => void refreshBridgeRuns()} onStop={() => void stopActiveRun()} onRetry={(runId) => void retryTask(runId)} onOpenContent={(contentId) => { const item = db.contents.find((content) => content.id === contentId); if (item) { setSelectedId(contentId); setView("library"); } else { setView("create"); } }} />}
+
         {view === "settings" && (
           <section className="settings-grid">
             <div className="panel profile-form">
@@ -1668,20 +1804,23 @@ export default function Home() {
               </div>
               <div className="autosave"><span className="live-dot" /> 修改后自动保存在本地</div>
             </div>
-            <div className="panel data-tools">
-              <span className="eyebrow">LOCAL DATA</span><h2>备份与迁移</h2><p>当前没有云同步。建议每次完成一期内容后导出一份 JSON 备份。</p>
-              <button className="primary-button" onClick={exportData}>导出全部数据</button>
-              <button className="secondary-button" onClick={() => importRef.current?.click()}>导入备份文件</button>
-              <input ref={importRef} className="hidden-input" type="file" accept="application/json" onChange={importData} />
-              <div className="divider" />
-              <button className="danger-button" onClick={clearAllContent}>清空全部内容与案例</button>
-              <small>只清除内容、案例和对应运营数据；账号定位、表达风格与模型配置不会被修改。此操作无法恢复，请先导出备份。</small>
+            <div className="settings-side">
+              <CodexConnectionPanel bridgeState={bridgeState} bridgeInfo={bridgeInfo} report={doctorReport} loading={doctorLoading} onCheck={() => void checkCodexConnection()} />
+              <div className="panel data-tools">
+                <span className="eyebrow">LOCAL DATA</span><h2>备份与迁移</h2><p>当前没有云同步。建议每次完成一期内容后导出一份 JSON 备份。</p>
+                <button className="primary-button" onClick={exportData}>导出全部数据</button>
+                <button className="secondary-button" onClick={() => importRef.current?.click()}>导入备份文件</button>
+                <input ref={importRef} className="hidden-input" type="file" accept="application/json" onChange={importData} />
+                <div className="divider" />
+                <button className="danger-button" onClick={clearAllContent}>清空全部内容与案例</button>
+                <small>只清除内容、案例和对应运营数据；账号定位、表达风格与 Codex 连接配置不会被修改。此操作无法恢复，请先导出备份。</small>
+              </div>
             </div>
           </section>
         )}
       </main>
 
-      {researchOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setResearchOpen(false)}><section className="task-modal" role="dialog" aria-modal="true" aria-labelledby="research-title" onMouseDown={(e) => e.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">TOPIC RESEARCH</span><h2 id="research-title">Codex 选题调研指令</h2><p>复制到 Codex 后，它会联网收集可访问样本，并标记需要你人工补充的视频号数据。</p></div><button className="icon-button" onClick={() => setResearchOpen(false)} aria-label="关闭">×</button></div><textarea className="task-output" readOnly value={researchPrompt} /><div className="modal-actions"><button className="secondary-button" onClick={() => setResearchOpen(false)}>暂时不用</button><button className="primary-button" onClick={copyResearchTask}>复制调研指令</button></div></section></div>}
+      {researchOpen && <TopicResearchModal topic={scoutTopic} run={activeRun?.taskType === "research" ? activeRun : null} loading={researchLoading} error={researchError} result={researchResult} onClose={() => setResearchOpen(false)} onStop={() => void stopActiveRun()} onApply={(angle) => { setResearchOpen(false); applyAngle(angle); }} />}
       {historyOpen && <HistoryArchiveModal form={historyForm} onChange={setHistoryForm} onTogglePlatform={toggleHistoryPlatform} onMetric={updateHistoryMetric} onSave={addHistoricalContent} onClose={() => setHistoryOpen(false)} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
@@ -1703,6 +1842,112 @@ function useRunElapsedSeconds(run: BridgeRun | null) {
 function elapsedLabel(seconds: number) {
   if (seconds < 60) return `${seconds} 秒`;
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+const taskTypeCopy: Record<BridgeRun["taskType"], string> = {
+  research: "联网选题调研",
+  angles: "三个选题角度",
+  content: "内容稿",
+  html: "HTML 录屏页",
+  cover: "三尺寸封面",
+  publishing: "平台发布包",
+};
+
+const runStatusCopy: Record<BridgeRunStatus, string> = {
+  queued: "排队中",
+  running: "生成中",
+  completed: "已完成",
+  failed: "失败",
+  cancelled: "已取消",
+  timeout: "已超时",
+  interrupted: "被中断",
+};
+
+const doctorCheckCopy: Record<string, string> = {
+  node: "Node.js 环境",
+  codex: "Codex CLI",
+  login: "Codex 登录",
+  skill: "工作站 Skill",
+  workspace: "任务工作区",
+  "image-generation": "图片生成能力",
+  renderer: "本地渲染能力",
+  "web-port": "网页端口",
+  "bridge-port": "Bridge 服务",
+};
+
+function safeExternalUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function CodexConnectionPanel({ bridgeState, bridgeInfo, report, loading, onCheck }: {
+  bridgeState: "checking" | "connected" | "offline";
+  bridgeInfo: { version: string; activeRuns: number } | null;
+  report: DoctorReport | null;
+  loading: boolean;
+  onCheck: () => void;
+}) {
+  const summary = bridgeState === "offline" ? "未连接" : report?.overall === "fail" ? "需要修复" : report?.overall === "warn" ? "可用，有提醒" : report?.overall === "pass" ? "连接正常" : "等待检测";
+  return <section className="panel codex-connection-panel">
+    <div className="connection-head"><div><span className="eyebrow">LOCAL CODEX</span><h2>Codex 连接中心</h2></div><strong className={`connection-summary summary-${report?.overall || bridgeState}`}>{summary}</strong></div>
+    <p>工作站复用本机 Codex CLI 的登录状态，不读取或展示认证文件。</p>
+    <div className="connection-meta"><span>Bridge {bridgeInfo?.version || "—"}</span><span>{bridgeInfo?.activeRuns || 0} 个运行中任务</span></div>
+    <button className="primary-button" onClick={onCheck} disabled={loading}>{loading ? "正在检查…" : "重新检测连接"}</button>
+    {report && <div className="doctor-list">{report.checks.map((check) => <article key={check.id} className={`doctor-${check.status}`}><i>{check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "×"}</i><div><strong>{doctorCheckCopy[check.id] || check.id}</strong><small>{check.message}</small>{check.fix && <p>{check.fix}</p>}</div></article>)}</div>}
+    {bridgeState === "offline" && <div className="connection-offline"><strong>先启动本机 Bridge</strong><code>npm run start:bridge</code></div>}
+  </section>;
+}
+
+function TaskCenter({ runs, activeRun, contents, onRefresh, onStop, onRetry, onOpenContent }: {
+  runs: BridgeRun[];
+  activeRun: BridgeRun | null;
+  contents: ContentItem[];
+  onRefresh: () => void;
+  onStop: () => void;
+  onRetry: (runId: string) => void;
+  onOpenContent: (contentId: string) => void;
+}) {
+  const runningCount = runs.filter((run) => run.status === "queued" || run.status === "running").length;
+  const failedCount = runs.filter((run) => run.status === "failed" || run.status === "timeout" || run.status === "interrupted").length;
+  return <section className="task-center">
+    <div className="task-summary-grid"><article><span>全部任务</span><strong>{runs.length}</strong><small>Bridge 本地记录</small></article><article><span>正在执行</span><strong>{runningCount}</strong><small>同一时间最多 1 个</small></article><article><span>需要处理</span><strong>{failedCount}</strong><small>失败、超时或中断</small></article><button className="secondary-button" onClick={onRefresh}>刷新任务</button></div>
+    <div className="panel task-list-panel">
+      <div className="panel-heading"><div><span className="eyebrow">RUN HISTORY</span><h2>Codex 任务记录</h2></div><span className="muted">按创建时间倒序</span></div>
+      <div className="task-run-list">{runs.length ? runs.map((run) => {
+        const content = contents.find((item) => item.id === run.contentId);
+        const isRunning = run.status === "queued" || run.status === "running";
+        const canRetry = !isRunning && !activeRun;
+        return <article key={run.runId} className={isRunning ? "active" : ""}>
+          <div className="task-run-main"><span className={`run-state run-${run.status}`}>{runStatusCopy[run.status]}</span><div><strong>{taskTypeCopy[run.taskType]}</strong><h3>{content?.title || (run.taskType === "research" || run.taskType === "angles" ? "选题探索任务" : run.contentId)}</h3><small>{new Date(run.createdAt).toLocaleString("zh-CN")} · {run.runId.slice(0, 16)}…</small></div></div>
+          {run.error && <p className="task-run-error">{run.error.message}</p>}
+          <div className="task-run-actions">{content && <button className="text-button" onClick={() => onOpenContent(run.contentId)}>打开内容</button>}{isRunning && activeRun?.runId === run.runId ? <button className="secondary-button" onClick={onStop}>停止任务</button> : <button className="secondary-button" disabled={!canRetry} onClick={() => onRetry(run.runId)}>按原输入重试</button>}</div>
+        </article>;
+      }) : <div className="empty-state compact"><strong>还没有 Codex 任务</strong><p>生成选题角度、内容稿或视觉资产后，任务会统一出现在这里。</p></div>}</div>
+    </div>
+  </section>;
+}
+
+function TopicResearchModal({ topic, run, loading, error, result, onClose, onStop, onApply }: {
+  topic: string;
+  run: BridgeRun | null;
+  loading: boolean;
+  error: string;
+  result: TopicResearchResult | null;
+  onClose: () => void;
+  onStop: () => void;
+  onApply: (angle: TopicAngle) => void;
+}) {
+  const elapsed = useRunElapsedSeconds(run);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={onClose}><section className="task-modal research-result-modal" role="dialog" aria-modal="true" aria-labelledby="research-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">LIVE TOPIC RESEARCH</span><h2 id="research-title">Codex 联网选题调研</h2><p>{topic}</p></div><button className="icon-button" onClick={onClose} aria-label="关闭">×</button></div>
+    {loading && <div className="research-running"><div className="run-activity" role="status"><div className="run-activity-copy"><span className="run-spinner" /><div><strong>{run?.status === "queued" ? "任务已提交，等待本机 Codex 接收" : "正在搜索公开样本并核验来源"}</strong><small>已运行 {elapsedLabel(elapsed)}。不可访问的平台会明确标记，不会补写虚构数据。</small></div></div><button className="secondary-button" onClick={onStop}>停止</button><div className="run-progress"><i /></div></div></div>}
+    {error && <div className="angle-error"><strong>调研未完成</strong><p>{error}</p></div>}
+    {result && <div className="research-report"><div className="research-summary"><span>{result.generationMeta.researchUsed ? "已使用联网搜索" : "未使用联网搜索"}</span><p>{result.summary}</p></div><div className="research-columns"><section><h3>常见角度</h3><ul>{result.commonAngles.map((item) => <li key={item}>{item}</li>)}</ul></section><section><h3>内容空白</h3><ul>{result.contentGaps.map((item) => <li key={item}>{item}</li>)}</ul></section></div><div className="research-platforms">{result.platformFindings.map((finding) => <section key={finding.platform}><div><h3>{finding.platform}</h3><span>{finding.accessibility}</span></div>{finding.samples.length ? <ul>{finding.samples.map((sample, index) => { const href = safeExternalUrl(sample.url); return <li key={`${sample.title}-${index}`}><strong>{sample.title}</strong><small>{sample.author} · {sample.publishedAt || "时间不可见"} · {sample.visibleMetrics || "互动数据不可见"}</small><p>{sample.angle}</p>{href && <a href={href} target="_blank" rel="noreferrer">查看来源 ↗</a>}</li>; })}</ul> : <p>{finding.limitations || "本次未找到可核验公开样本。"}</p>}</section>)}</div><div className="research-recommendations"><h3>建议切入角度</h3>{result.recommendedAngles.map((angle, index) => <article key={`${angle.type}-${angle.title}`} className={index === result.recommendedAngleIndex ? "recommended" : ""}><span>{index === result.recommendedAngleIndex ? "推荐" : angle.type}</span><h4>{angle.title}</h4><p>{angle.viewpoint}</p><small>需要证据：{angle.evidenceNeeded}</small><button className="primary-button" onClick={() => onApply(angle)}>用这个角度写</button></article>)}</div>{result.manualFollowups.length > 0 && <div className="research-followups"><strong>还需要人工补充</strong><ul>{result.manualFollowups.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>}
+    {!loading && <div className="modal-actions"><button className="secondary-button" onClick={onClose}>关闭</button></div>}
+  </section></div>;
 }
 
 function TopicAngleGenerationStatus({ run, onCancel }: { run: BridgeRun | null; onCancel: () => void }) {

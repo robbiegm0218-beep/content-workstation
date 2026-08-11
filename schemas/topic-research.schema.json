@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "generationMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skillName": { "type": "string" },
+        "skillEvidence": { "type": "string" },
+        "researchUsed": { "type": "boolean" }
+      },
+      "required": ["skillName", "skillEvidence", "researchUsed"]
+    },
+    "summary": { "type": "string" },
+    "platformFindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "platform": { "type": "string" },
+          "accessibility": { "type": "string" },
+          "samples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": { "type": "string" },
+                "author": { "type": "string" },
+                "publishedAt": { "type": "string" },
+                "visibleMetrics": { "type": "string" },
+                "url": { "type": "string" },
+                "angle": { "type": "string" }
+              },
+              "required": ["title", "author", "publishedAt", "visibleMetrics", "url", "angle"]
+            }
+          },
+          "limitations": { "type": "string" }
+        },
+        "required": ["platform", "accessibility", "samples", "limitations"]
+      }
+    },
+    "commonAngles": { "type": "array", "items": { "type": "string" } },
+    "contentGaps": { "type": "array", "items": { "type": "string" } },
+    "recommendedAngles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string" },
+          "title": { "type": "string" },
+          "viewpoint": { "type": "string" },
+          "audiencePain": { "type": "string" },
+          "contentValue": { "type": "string" },
+          "evidenceNeeded": { "type": "string" }
+        },
+        "required": ["type", "title", "viewpoint", "audiencePain", "contentValue", "evidenceNeeded"]
+      }
+    },
+    "recommendedAngleIndex": { "type": "integer", "minimum": 0, "maximum": 2 },
+    "manualFollowups": { "type": "array", "items": { "type": "string" } },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["generationMeta", "summary", "platformFindings", "commonAngles", "contentGaps", "recommendedAngles", "recommendedAngleIndex", "manualFollowups", "limitations"]
+}

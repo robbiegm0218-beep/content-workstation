@@ -47,6 +47,7 @@ async function canListen(host, port) {
 
 export async function runDoctor(config, {
   bridgeIsListening = false,
+  webIsListening = false,
   commandRunner = commandResult,
   portProbe = canListen
 } = {}) {
@@ -132,11 +133,17 @@ export async function runDoctor(config, {
     chromeAvailable || sips.ok ? null : "Install Google Chrome or configure a supported renderer"
   );
 
-  const webPort = await portProbe("127.0.0.1", 3000);
+  const webPort = webIsListening ? { available: true, errorCode: null } : await portProbe("127.0.0.1", 3000);
   add(
     "web-port",
     webPort.available ? "pass" : "warn",
-    webPort.available ? "Port 3000 is available" : webPort.errorCode === "EADDRINUSE" ? "Port 3000 is already in use" : `Port 3000 probe was blocked (${webPort.errorCode})`
+    webIsListening
+      ? "Web app is running on port 3000"
+      : webPort.available
+        ? "Port 3000 is available"
+        : webPort.errorCode === "EADDRINUSE"
+          ? "Port 3000 is already in use"
+          : `Port 3000 probe was blocked (${webPort.errorCode})`
   );
   const bridgePort = bridgeIsListening ? { available: true, errorCode: null } : await portProbe(config.host, config.port);
   const bridgePortStatus = bridgePort.available ? "pass" : bridgePort.errorCode === "EADDRINUSE" ? "fail" : "warn";
