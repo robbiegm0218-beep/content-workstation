@@ -7,12 +7,14 @@ import {
   connectLocalBridge,
   continueBridgeRun,
   createContentRun,
+  createTopicAnglesRun,
   createVisualRun,
   getArtifactBlob,
   getArtifactManifest,
   getBridgeRun,
   getContentBundle,
   getContentResult,
+  getTopicAnglesResult,
   getWorkstationState,
   listBridgeRuns,
   saveWorkstationState,
@@ -364,7 +366,6 @@ export default function Home() {
   const [topicAngles, setTopicAngles] = useState<TopicAngle[]>([]);
   const [anglesLoading, setAnglesLoading] = useState(false);
   const [anglesError, setAnglesError] = useState("");
-  const [anglesModel, setAnglesModel] = useState("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ContentStatus | "全部">("全部");
@@ -630,7 +631,8 @@ export default function Home() {
       const { runs } = await listBridgeRuns();
       const recoverable = runs.find((run) => run.status === "queued" || run.status === "running");
       if (recoverable) {
-        if (recoverable.taskType === "content") void pollContentRun(recoverable);
+        if (recoverable.taskType === "angles") void pollTopicAnglesRun(recoverable);
+        else if (recoverable.taskType === "content") void pollContentRun(recoverable);
         else void pollVisualRun(recoverable);
         return;
       }
@@ -1002,28 +1004,87 @@ export default function Home() {
       setAnglesError("请先输入一个具体议题。");
       return;
     }
+    if (activeRun) {
+      setAnglesError("当前已有 Codex 任务运行，请等待完成或先停止。");
+      return;
+    }
     setAnglesLoading(true);
     setAnglesError("");
     setTopicAngles([]);
+    let bridgeConnected = false;
     try {
-      const response = await fetch("/api/topic-angles", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      setBridgeState("checking");
+      await connectLocalBridge();
+      bridgeConnected = true;
+      setBridgeState("connected");
+      const { run } = await createTopicAnglesRun({
+        contentId: uid("angles"),
+        contentVersion: 1,
+        creatorContext: {
+          name: db.settings.name,
+          role: db.settings.role,
+          experience: db.settings.experience,
+          audience: db.settings.audience,
+          voice: db.settings.style,
+          goal: db.settings.goal,
+          cases: db.cases.slice(0, 8).map((item) => ({
+            title: item.title,
+            industry: item.industry,
+            background: item.background,
+            action: item.action,
+            result: item.result,
+            tags: item.tags,
+          })),
+        },
+        contentBrief: {
           topic,
-          creator: db.settings,
-          cases: db.cases.slice(0, 8).map((item) => ({ title: item.title, industry: item.industry, background: item.background, result: item.result })),
-        }),
+          purpose: "为后续自媒体内容生产推荐三个差异明确、能够落地的切入角度",
+          constraint: "不虚构平台热度、搜索结论、个人项目经历或数据",
+        },
       });
-      const result = await response.json() as { angles?: TopicAngle[]; model?: string; error?: string };
-      if (!response.ok || !result.angles) throw new Error(result.error || "生成失败，请稍后重试。");
-      setTopicAngles(result.angles);
-      setAnglesModel(result.model || "OpenAI");
-      setNotice("已生成 3 个动态选题角度。");
+      setNotice("任务已提交给本机 Codex，完成后会自动显示 3 个角度。");
+      await pollTopicAnglesRun(run);
     } catch (error) {
-      setAnglesError(error instanceof Error ? error.message : "生成失败，请稍后重试。");
-    } finally {
+      setBridgeState(bridgeConnected ? "connected" : "offline");
+      setAnglesError(error instanceof Error ? error.message : "无法连接本机 Codex Bridge。");
       setAnglesLoading(false);
+    }
+  }
+
+  async function pollTopicAnglesRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setAnglesLoading(true);
+    setAnglesError("");
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        await new Promise((resolve) => window.setTimeout(resolve, 900));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const result = await getTopicAnglesResult(run.runId);
+        if (!Array.isArray(result.angles) || result.angles.length !== 3) {
+          throw new Error("Codex 返回的角度数量不正确，请重新生成。");
+        }
+        setTopicAngles(result.angles);
+        setNotice("本机 Codex 已生成 3 个动态选题角度。");
+      } else {
+        const message = run.status === "cancelled" ? "选题角度生成已停止。" : run.error?.message || "选题角度生成未完成，请重试。";
+        setAnglesError(message);
+        setNotice(message);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "读取 Codex 选题角度失败。";
+      setAnglesError(message);
+      setNotice(message);
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setAnglesLoading(false);
+      setActiveRun((currentRun) => currentRun?.runId === initialRun.runId ? null : currentRun);
     }
   }
 
@@ -1327,8 +1388,8 @@ export default function Home() {
           <p>内容与任务保存在本机工作站中，请定期导出备份。</p>
         </div>
         <div className="profile-mini">
-          <span className="avatar">R</span>
-          <span><strong>{db.settings.name}</strong><small>10 年产品实战</small></span>
+          <span className="avatar">{db.settings.name.trim().slice(0, 1) || "创"}</span>
+          <span><strong>{db.settings.name}</strong><small>{db.settings.role || "本地内容创作者"}</small></span>
         </div>
       </aside>
 
@@ -1397,11 +1458,11 @@ export default function Home() {
             <div className="form-stack">
               <div className="topic-scout">
                 <div className="scout-heading">
-                  <div><span className="eyebrow">TOPIC RADAR</span><h2>先看看别人怎么讲，再决定你讲什么</h2><p>平台检索找同类，AI结合账号资料实时生成差异化切入角度。</p></div>
+                  <div><span className="eyebrow">TOPIC RADAR</span><h2>先看看别人怎么讲，再决定你讲什么</h2><p>平台检索找同类，Codex 结合账号资料实时生成差异化切入角度。</p></div>
                   <span className="beta-badge">选题推荐 · BETA</span>
                 </div>
                 <div className="scout-search">
-                  <label><span>想调研的议题</span><span className="scout-input-row"><input value={scoutTopic} onChange={(e) => { setScoutTopic(e.target.value); setTopicAngles([]); setAnglesError(""); }} onKeyDown={(e) => { if (e.key === "Enter") void generateTopicAngles(); }} placeholder="例如：产品经理如何做 Agent 需求判断" /><button type="button" className="generate-angle-button" onClick={() => void generateTopicAngles()} disabled={!scoutTopic.trim() || anglesLoading}>{anglesLoading ? "正在生成…" : "AI 生成 3 个角度"}</button></span></label>
+                  <label><span>想调研的议题</span><span className="scout-input-row"><input value={scoutTopic} onChange={(e) => { setScoutTopic(e.target.value); setTopicAngles([]); setAnglesError(""); }} onKeyDown={(e) => { if (e.key === "Enter") void generateTopicAngles(); }} placeholder="例如：产品经理如何做 Agent 需求判断" /><button type="button" className="generate-angle-button" onClick={() => void generateTopicAngles()} disabled={!scoutTopic.trim() || anglesLoading}>{anglesLoading ? "Codex 生成中…" : "Codex 生成 3 个角度"}</button></span></label>
                   <div className="scout-actions">
                     <a className={`platform-search ${!scoutTopic.trim() ? "disabled" : ""}`} href={scoutTopic.trim() ? `https://search.bilibili.com/all?keyword=${encodeURIComponent(scoutTopic.trim())}` : undefined} target="_blank" rel="noreferrer"><strong>B</strong><span>查 B站<small>打开关键词搜索</small></span></a>
                     <a className={`platform-search red ${!scoutTopic.trim() ? "disabled" : ""}`} href={scoutTopic.trim() ? `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(scoutTopic.trim())}` : undefined} target="_blank" rel="noreferrer"><strong>RED</strong><span>查小红书<small>可能需要登录</small></span></a>
@@ -1415,10 +1476,10 @@ export default function Home() {
                     <li><span>4</span><p><strong>确定切口</strong><small>带入简报并补真实案例</small></p></li>
                   </ol>
                 </div>
-                {anglesLoading && <div className="angle-results"><div className="angle-title"><strong>正在结合账号定位生成角度</strong><span>模型实时分析中</span></div><div className="angle-grid loading">{[1, 2, 3].map((item) => <article key={item}><i /><i /><i /><i /></article>)}</div></div>}
-                {anglesError && <div className="angle-error"><strong>暂时无法生成</strong><p>{anglesError}</p><small>如果提示尚未配置，请在本地环境中设置 DEEPSEEK_API_KEY 或 OPENAI_API_KEY 后重启应用。</small></div>}
-                {topicAngles.length > 0 && <div className="angle-results"><div className="angle-title"><strong>AI 实时生成的 3 个切入角度</strong><span>{anglesModel} · 基于当前议题与账号资料</span></div><div className="angle-grid dynamic">{topicAngles.map((angle) => <article key={`${angle.type}-${angle.title}`}><span>{angle.type}</span><h3>{angle.title}</h3><p>{angle.viewpoint}</p><dl><div><dt>受众痛点</dt><dd>{angle.audiencePain}</dd></div><div><dt>内容价值</dt><dd>{angle.contentValue}</dd></div><div><dt>需要证据</dt><dd>{angle.evidenceNeeded}</dd></div></dl><button onClick={() => applyAngle(angle)}>用这个角度写 →</button></article>)}</div></div>}
-                <div className="feasibility-note"><strong>当前能力边界</strong><p>三个角度由模型结合议题、账号资料和案例实时生成，不再使用固定模板。B站、小红书和视频号的真实平台样本仍通过上方入口查看；模型不会虚构平台热度或互动数据。</p></div>
+                {anglesLoading && <TopicAngleGenerationStatus run={activeRun?.taskType === "angles" ? activeRun : null} onCancel={() => void stopActiveRun()} />}
+                {anglesError && <div className="angle-error"><strong>暂时无法生成</strong><p>{anglesError}</p><small>请确认设置页显示“Codex 已连接”，并确保当前没有其他 Codex 任务运行。</small></div>}
+                {topicAngles.length > 0 && <div className="angle-results"><div className="angle-title"><strong>本机 Codex 生成的 3 个切入角度</strong><span>基于当前议题、账号资料与案例库</span></div><div className="angle-grid dynamic">{topicAngles.map((angle) => <article key={`${angle.type}-${angle.title}`}><span>{angle.type}</span><h3>{angle.title}</h3><p>{angle.viewpoint}</p><dl><div><dt>受众痛点</dt><dd>{angle.audiencePain}</dd></div><div><dt>内容价值</dt><dd>{angle.contentValue}</dd></div><div><dt>需要证据</dt><dd>{angle.evidenceNeeded}</dd></div></dl><button onClick={() => applyAngle(angle)}>用这个角度写 →</button></article>)}</div></div>}
+                <div className="feasibility-note"><strong>当前能力边界</strong><p>三个角度由本机 Codex 结合议题、账号资料和案例库实时生成，不再需要 DeepSeek 或 OpenAI API Key。B站、小红书和视频号的真实平台样本仍通过上方入口查看；Codex 不会虚构平台热度或互动数据。</p></div>
               </div>
 
               <div className="form-section" id="content-brief">
@@ -1628,24 +1689,29 @@ export default function Home() {
 }
 
 function useRunElapsedSeconds(run: BridgeRun | null) {
-  const [elapsed, setElapsed] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!run || (run.status !== "queued" && run.status !== "running")) {
-      setElapsed(0);
-      return;
-    }
-    const startedAt = new Date(run.startedAt || run.createdAt).getTime();
-    const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    update();
-    const timer = window.setInterval(update, 1000);
+    if (!run || (run.status !== "queued" && run.status !== "running")) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [run]);
-  return elapsed;
+  if (!run || (run.status !== "queued" && run.status !== "running")) return 0;
+  const startedAt = new Date(run.startedAt || run.createdAt).getTime();
+  return Math.max(0, Math.floor((now - startedAt) / 1000));
 }
 
 function elapsedLabel(seconds: number) {
   if (seconds < 60) return `${seconds} 秒`;
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+function TopicAngleGenerationStatus({ run, onCancel }: { run: BridgeRun | null; onCancel: () => void }) {
+  const elapsed = useRunElapsedSeconds(run);
+  return <div className="angle-results">
+    <div className="angle-title"><strong>本机 Codex 正在生成 3 个切入角度</strong><span>{run?.status === "queued" ? "任务已提交，等待执行" : `已运行 ${elapsedLabel(elapsed)}`}</span></div>
+    <div className="run-activity" role="status" aria-live="polite"><div className="run-activity-copy"><span className="run-spinner" /><div><strong>{run?.status === "queued" ? "等待本机 Codex 接收任务" : "正在结合账号定位、议题与案例库进行判断"}</strong><small>完成后会自动显示三张角度卡片；生成期间可以停止任务。</small></div></div><button className="secondary-button" onClick={onCancel}>停止</button><div className="run-progress"><i /></div></div>
+    <div className="angle-grid loading">{[1, 2, 3].map((item) => <article key={item}><i /><i /><i /><i /></article>)}</div>
+  </div>;
 }
 
 function ContentGenerationPanel({ item, activeRun, onGenerate, onCancel, onApplyVersion }: {

@@ -5,7 +5,7 @@ export const BRIDGE_VERSION = "0.1.0";
 export const BRIDGE_HOST = "127.0.0.1";
 export const DEFAULT_BRIDGE_PORT = 4317;
 export const MINIMUM_VALIDATED_CODEX_VERSION = "0.146.0-alpha.9.2";
-export const SUPPORTED_TASK_TYPES = new Set(["content", "html", "cover", "publishing"]);
+export const SUPPORTED_TASK_TYPES = new Set(["angles", "content", "html", "cover", "publishing"]);
 export const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "timeout", "interrupted"]);
 
 const bridgeDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,7 @@ export function createBridgeConfig(overrides = {}) {
     maxBodyBytes: overrides.maxBodyBytes ?? 2 * 1024 * 1024,
     maxConcurrentRuns: overrides.maxConcurrentRuns ?? 1,
     taskTimeoutMs: {
+      angles: 5 * 60_000,
       content: 8 * 60_000,
       html: 8 * 60_000,
       cover: 12 * 60_000,

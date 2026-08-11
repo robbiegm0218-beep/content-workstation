@@ -40,6 +40,10 @@ export class WorkspaceManager {
       path.join(workspace, "schemas/content-result.schema.json")
     );
     await cp(
+      path.join(this.config.projectRoot, "schemas/topic-angles.schema.json"),
+      path.join(workspace, "schemas/topic-angles.schema.json")
+    );
+    await cp(
       path.join(this.config.projectRoot, "schemas/artifact-manifest.schema.json"),
       path.join(workspace, "schemas/artifact-manifest.schema.json")
     );
@@ -54,7 +58,7 @@ export class WorkspaceManager {
     };
     await writeFile(path.join(workspace, "input/task.json"), `${JSON.stringify(taskSnapshot, null, 2)}\n`, { mode: 0o600 });
 
-    if (input.taskType === "content") {
+    if (input.taskType === "angles" || input.taskType === "content") {
       await writeFile(
         path.join(workspace, "input/creator-context.json"),
         `${JSON.stringify(input.creatorContext, null, 2)}\n`,

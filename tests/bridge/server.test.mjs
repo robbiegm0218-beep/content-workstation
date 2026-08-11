@@ -13,7 +13,18 @@ async function fakeRunner(options) {
   if (options.resumeThreadId) observedResumeThreads.push(options.resumeThreadId);
   options.onEvent?.({ type: "thread.started", thread_id: "thread-fake-bridge" });
   options.onEvent?.({ type: "turn.started" });
-  const result = {
+  const result = options.outputPath.endsWith("topic-angles.json") ? {
+    generationMeta: {
+      skillName: "content-workstation-creator",
+      skillEvidence: "CW-SKILL-1.0",
+      researchUsed: false
+    },
+    angles: [
+      { type: "误区纠偏", title: "别先搭后台", viewpoint: "先定义质量关卡", audiencePain: "容易从功能清单开始", contentValue: "建立判断顺序", evidenceNeeded: "补充项目决策案例" },
+      { type: "实战方法", title: "四步拆解", viewpoint: "按数据流逐段验收", audiencePain: "不知道如何推进", contentValue: "给出执行方法", evidenceNeeded: "补充验收指标" },
+      { type: "转型视角", title: "能力迁移", viewpoint: "传统产品能力可以复用", audiencePain: "担心技术门槛", contentValue: "明确学习重点", evidenceNeeded: "补充迁移案例" }
+    ]
+  } : {
     generationMeta: {
       skillName: "content-workstation-creator",
       skillEvidence: "CW-SKILL-1.0",
@@ -189,6 +200,39 @@ test("Bridge enforces loopback, Origin, token, task whitelist, persistence and a
   });
   assert.equal(artifactResponse.status, 200);
   assert.equal((await artifactResponse.json()).generationMeta.skillEvidence, "CW-SKILL-1.0");
+
+  const anglesCreated = await jsonRequest(baseUrl, "/v1/runs", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Origin: "http://localhost:3000",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      contentId: "angles-001",
+      taskType: "angles",
+      contentVersion: 1,
+      creatorContext: { voice: "practical" },
+      contentBrief: { topic: "RAG 后台流转" }
+    })
+  });
+  assert.equal(anglesCreated.response.status, 202);
+  const anglesRunId = anglesCreated.body.run.runId;
+  let anglesRun;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const current = await jsonRequest(baseUrl, `/v1/runs/${anglesRunId}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    anglesRun = current.body.run;
+    if (anglesRun.status === "completed") break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(anglesRun.status, "completed");
+  const anglesArtifact = await fetch(`${baseUrl}/v1/artifacts/${anglesRunId}/file/topic-angles-result`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  assert.equal(anglesArtifact.status, 200);
+  assert.equal((await anglesArtifact.json()).angles.length, 3);
 
   const unknownArtifact = await jsonRequest(baseUrl, `/v1/artifacts/${runId}/file/not-registered`, {
     headers: { Authorization: `Bearer ${token}` }

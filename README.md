@@ -34,6 +34,8 @@
 
 ```bash
 npm install
+npm run start:bridge
+# 另开一个终端
 npm run dev
 ```
 
@@ -51,9 +53,9 @@ npm test
 - 内容、案例、设置和生产状态优先保存在本机 Bridge 的 `.data/workstation-state.json`，浏览器 `localStorage` 作为兜底；请定期从设置页导出 JSON 备份。
 - 每个本地使用者拥有独立数据；仓库不包含个人内容、账号资料或真实 API Key。
 - 应用不再预置演示内容和案例，首次打开时内容库为空。
-- 动态选题角度通过服务端调用 DeepSeek 或 OpenAI。
-- 密钥只放在 `.env.local`，不要写进页面代码或提交到 Git。
-- 当前内容、HTML、封面和发布包通过本机 Codex 独立生成并自动回写。
+- 动态选题角度通过本机 Codex Bridge 生成，与内容稿、HTML、封面和发布包共用同一连接。
+- 当前内容生产不需要 DeepSeek 或 OpenAI API Key；本机 Codex 登录信息也不会写入仓库。
+- 当前选题角度、内容、HTML、封面和发布包通过本机 Codex 独立生成并自动回写。
 
 ## 产物位置与导出
 

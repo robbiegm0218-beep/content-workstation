@@ -38,6 +38,8 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   ]);
 
   assert.match(page, /使用 Codex 生成内容/);
+  assert.match(page, /Codex 生成 3 个角度/);
+  assert.match(page, /pollTopicAnglesRun/);
   assert.match(page, /完成后会自动回填/);
   assert.match(page, /ContentGenerationPanel/);
   assert.match(page, /contentVersions/);
@@ -90,6 +92,8 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(css, /\.publishing-artifact-preview/);
   assert.match(bridgeClient, /\/v1\/session/);
   assert.match(bridgeClient, /createContentRun/);
+  assert.match(bridgeClient, /createTopicAnglesRun/);
+  assert.match(bridgeClient, /getTopicAnglesResult/);
   assert.match(bridgeClient, /getContentResult/);
   assert.match(bridgeClient, /createVisualRun/);
   assert.match(bridgeClient, /continueBridgeRun/);

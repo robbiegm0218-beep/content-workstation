@@ -6,6 +6,24 @@ import { validateArtifactManifest } from "./artifact-validator.mjs";
 export function createTaskSpecification(input, workspace, timeoutMs) {
   const taskPath = path.join(workspace, "input/task.json");
 
+  if (input.taskType === "angles") {
+    return {
+      prompt: [
+        "请使用 $content-workstation-creator Skill 生成选题切入角度。",
+        `账号资料：${path.join(workspace, "input/creator-context.json")}`,
+        `议题简报：${path.join(workspace, "input/content-brief.json")}`,
+        `任务补充要求：${taskPath}`,
+        "本轮只生成恰好 3 个差异明确、可用于后续内容创作的切入角度，不生成完整内容稿、HTML、封面或发布包。",
+        "只依据输入中的账号资料、议题和案例判断；不虚构平台热度、搜索结果、项目经历或数据。",
+        "最终只输出符合指定 JSON Schema 的 JSON。"
+      ].join("\n"),
+      sandbox: "read-only",
+      schemaPath: path.join(workspace, "schemas/topic-angles.schema.json"),
+      outputPath: path.join(workspace, "output/topic-angles.json"),
+      timeoutMs
+    };
+  }
+
   if (input.taskType === "content") {
     return {
       prompt: [
@@ -66,20 +84,21 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
 }
 
 export async function finalizeTaskResult(input, workspace, structuredResult) {
-  if (input.taskType === "content") {
+  if (input.taskType === "angles" || input.taskType === "content") {
     if (structuredResult.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
-      throw new Error("Content result is missing repository Skill evidence");
+      throw new Error(`${input.taskType} result is missing repository Skill evidence`);
     }
-    const artifactPath = path.join(workspace, "output/content-result.json");
+    const isAngles = input.taskType === "angles";
+    const artifactPath = path.join(workspace, isAngles ? "output/topic-angles.json" : "output/content-result.json");
     const buffer = await readFile(artifactPath);
     return {
       manifestVersion: "1.0",
-      taskType: "content",
+      taskType: input.taskType,
       generationMode: "codex-structured",
       artifacts: [{
-        id: "content-result",
-        type: "content-json",
-        path: "output/content-result.json",
+        id: isAngles ? "topic-angles-result" : "content-result",
+        type: isAngles ? "topic-angles-json" : "content-json",
+        path: isAngles ? "output/topic-angles.json" : "output/content-result.json",
         mimeType: "application/json",
         width: null,
         height: null,

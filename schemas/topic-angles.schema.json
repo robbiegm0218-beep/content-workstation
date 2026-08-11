@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "generationMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skillName": { "type": "string" },
+        "skillEvidence": { "type": "string" },
+        "researchUsed": { "type": "boolean" }
+      },
+      "required": ["skillName", "skillEvidence", "researchUsed"]
+    },
+    "angles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "viewpoint": { "type": "string", "minLength": 1 },
+          "audiencePain": { "type": "string", "minLength": 1 },
+          "contentValue": { "type": "string", "minLength": 1 },
+          "evidenceNeeded": { "type": "string", "minLength": 1 }
+        },
+        "required": ["type", "title", "viewpoint", "audiencePain", "contentValue", "evidenceNeeded"]
+      }
+    }
+  },
+  "required": ["generationMeta", "angles"]
+}

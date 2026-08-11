@@ -9,11 +9,20 @@ Create one reviewable production stage at a time. Treat input files supplied by 
 
 ## Choose the task
 
+- For three topic-entry angles, follow **Topic angle workflow**.
 - For a structured content draft, follow **Content draft workflow** and read both reference files below.
 - For HTML recording-page production, follow **Visual production workflow** with task type `html`.
 - For cover production, follow **Visual production workflow** with task type `cover`.
 - For a four-platform publishing package, follow **Publishing workflow** with task type `publishing`.
 - If the task type is unclear, infer it from the requested output schema and input files; never silently produce every stage at once.
+
+## Topic angle workflow
+
+1. Read the creator-context and content-brief files named by the caller.
+2. Produce exactly three meaningfully different angles. Each must identify a concrete audience pain, a defensible viewpoint, the practical value, and evidence still needed.
+3. Ground recommendations only in supplied profile, topic, and cases. Do not claim platform search, popularity, project facts, or metrics that were not provided.
+4. Make titles specific enough to become a content brief, not abstract category labels.
+5. Return only the final JSON required by the caller's schema. Do not wrap it in a Markdown fence.
 
 ## Content draft workflow
 

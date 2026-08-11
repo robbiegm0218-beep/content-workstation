@@ -5,7 +5,7 @@ export type BridgeRunStatus = "queued" | "running" | "completed" | "failed" | "c
 export type BridgeRun = {
   runId: string;
   contentId: string;
-  taskType: "content" | "html" | "cover" | "publishing";
+  taskType: "angles" | "content" | "html" | "cover" | "publishing";
   contentVersion: number;
   status: BridgeRunStatus;
   threadId: string | null;
@@ -22,6 +22,22 @@ export type ContentResult = {
   coreThesis: string;
   script: { opening: string; body: string; closing: string; fullMarkdown: string };
   [key: string]: unknown;
+};
+
+export type TopicAnglesResult = {
+  generationMeta: {
+    skillName: string;
+    skillEvidence: string;
+    researchUsed: boolean;
+  };
+  angles: Array<{
+    type: string;
+    title: string;
+    viewpoint: string;
+    audiencePain: string;
+    contentValue: string;
+    evidenceNeeded: string;
+  }>;
 };
 
 export type ArtifactManifest = {
@@ -100,6 +116,19 @@ export async function createContentRun(input: {
   }));
 }
 
+export async function createTopicAnglesRun(input: {
+  contentId: string;
+  contentVersion: number;
+  instruction?: string;
+  creatorContext: Record<string, unknown>;
+  contentBrief: Record<string, unknown>;
+}) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch("/v1/runs", {
+    method: "POST",
+    body: JSON.stringify({ ...input, taskType: "angles" }),
+  }));
+}
+
 export async function createVisualRun(input: {
   contentId: string;
   taskType: "html" | "cover" | "publishing";
@@ -134,6 +163,10 @@ export async function cancelBridgeRun(runId: string) {
 
 export async function getContentResult(runId: string) {
   return readJson<ContentResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/content-result`));
+}
+
+export async function getTopicAnglesResult(runId: string) {
+  return readJson<TopicAnglesResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/topic-angles-result`));
 }
 
 export async function getArtifactManifest(runId: string) {

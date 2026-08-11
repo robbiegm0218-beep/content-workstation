@@ -40,6 +40,23 @@ test("visual tasks require confirmed content and style configuration", () => {
   }));
 });
 
+test("topic angle tasks use creator context and a content brief", () => {
+  assert.doesNotThrow(() => validateCreateRunInput({
+    ...contentInput,
+    contentId: "angles-001",
+    taskType: "angles"
+  }));
+  assert.throws(
+    () => validateCreateRunInput({
+      contentId: "angles-001",
+      taskType: "angles",
+      contentVersion: 1,
+      creatorContext: {}
+    }),
+    /contentBrief must be an object/
+  );
+});
+
 test("Codex receives a minimal environment without unrelated secrets", () => {
   const environment = createMinimalCodexEnvironment({
     PATH: "/bin",
