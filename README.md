@@ -31,16 +31,34 @@
 
 ## 本地运行
 
-需要 Node.js `>=22.13.0`。
+需要 Node.js `>=22.13.0`，并在本机安装、登录 Codex CLI。
+
+### 第一次运行
 
 ```bash
 npm install
-npm run start:bridge
-# 另开一个终端
-npm run dev
+npm install --global @openai/codex
+codex login
+npm run doctor
+npm run dev:local
 ```
 
-打开 `http://localhost:3000/`。
+`codex login` 会打开浏览器完成 ChatGPT 登录；可用 `codex login status` 查看当前认证方式。启动后打开 `http://localhost:3000/`，页面会自动显示首次使用向导，完成 Codex 检测和账号资料设置。
+
+### 以后启动
+
+```bash
+npm run dev:local
+```
+
+这一条命令会同时启动网页和本机 Codex Bridge。按 `Ctrl+C` 会一起停止两个服务，不需要分别维护两个终端。
+
+如果首次检查未通过：
+
+- 提示找不到 Codex：运行 `npm install --global @openai/codex`。
+- 提示未登录：运行 `codex login`，完成浏览器登录后回到设置页重新检测。
+- 提示端口占用：先关闭之前启动的内容工作站，再重新运行 `npm run dev:local`。
+- 需要机器可读诊断结果：运行 `npm run doctor -- --json`。
 
 ## 验证命令
 

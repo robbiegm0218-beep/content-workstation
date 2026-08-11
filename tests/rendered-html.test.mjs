@@ -43,6 +43,11 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(page, /startTopicResearch/);
   assert.match(page, /function TopicResearchModal/);
   assert.match(page, /function CodexConnectionPanel/);
+  assert.match(page, /function FirstRunSetupModal/);
+  assert.match(page, /function SetupGuidePanel/);
+  assert.match(page, /npm run dev:local/);
+  assert.match(page, /codex login status/);
+  assert.match(page, /isProfileConfigured/);
   assert.match(page, /function TaskCenter/);
   assert.match(page, /pollTopicAnglesRun/);
   assert.match(page, /完成后会自动回填/);

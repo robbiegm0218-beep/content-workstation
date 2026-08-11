@@ -301,6 +301,20 @@ const seedData: Database = {
   cases: [],
 };
 
+const setupPlaceholders = new Set([
+  "内容创作者",
+  "请填写你的身份与账号定位",
+  "请填写可用于内容创作的真实经历。",
+  "请填写你的目标受众",
+  "请填写你希望保持的表达风格。",
+  "请填写内容目标与商业目标。",
+]);
+
+function isProfileConfigured(settings: Settings) {
+  return [settings.name, settings.role, settings.experience, settings.audience, settings.style, settings.goal]
+    .every((value) => value.trim() && !setupPlaceholders.has(value.trim()));
+}
+
 const initialHistoryForm = (): HistoryForm => ({
   title: "",
   subtitle: "",
@@ -388,6 +402,8 @@ export default function Home() {
   const [bridgeRuns, setBridgeRuns] = useState<BridgeRun[]>([]);
   const [doctorReport, setDoctorReport] = useState<DoctorReport | null>(null);
   const [doctorLoading, setDoctorLoading] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupDraft, setSetupDraft] = useState<Settings>(seedData.settings);
   const [activeRun, setActiveRun] = useState<BridgeRun | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const pollingRuns = useRef(new Set<string>());
@@ -421,6 +437,8 @@ export default function Home() {
           // Bridge state is an additional local persistence layer; browser data remains the offline fallback.
         }
         setDb(loadedDatabase);
+        setSetupDraft(loadedDatabase.settings);
+        if (!isProfileConfigured(loadedDatabase.settings)) setSetupOpen(true);
         setReady(true);
       })();
     }, 0);
@@ -1502,6 +1520,32 @@ export default function Home() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function openSetupGuide() {
+    setSetupDraft(db.settings);
+    setSetupOpen(true);
+    void checkCodexConnection();
+  }
+
+  function saveSetupProfile() {
+    if (!isProfileConfigured(setupDraft)) {
+      setNotice("请填写完整的账号身份、经历、受众、风格和内容目标。");
+      return;
+    }
+    setDb((current) => ({ ...current, settings: setupDraft }));
+    setForm((current) => ({ ...current, audience: setupDraft.audience, platforms: [...setupDraft.defaultPlatforms] }));
+    setSetupOpen(false);
+    setNotice("首次设置已完成，可以开始创建内容。 ");
+  }
+
+  async function copySetupCommand(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setNotice(`已复制：${command}`);
+    } catch {
+      setNotice(`请在终端运行：${command}`);
+    }
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -1805,6 +1849,7 @@ export default function Home() {
               <div className="autosave"><span className="live-dot" /> 修改后自动保存在本地</div>
             </div>
             <div className="settings-side">
+              <SetupGuidePanel configured={isProfileConfigured(db.settings)} bridgeState={bridgeState} onOpen={openSetupGuide} />
               <CodexConnectionPanel bridgeState={bridgeState} bridgeInfo={bridgeInfo} report={doctorReport} loading={doctorLoading} onCheck={() => void checkCodexConnection()} />
               <div className="panel data-tools">
                 <span className="eyebrow">LOCAL DATA</span><h2>备份与迁移</h2><p>当前没有云同步。建议每次完成一期内容后导出一份 JSON 备份。</p>
@@ -1821,6 +1866,7 @@ export default function Home() {
       </main>
 
       {researchOpen && <TopicResearchModal topic={scoutTopic} run={activeRun?.taskType === "research" ? activeRun : null} loading={researchLoading} error={researchError} result={researchResult} onClose={() => setResearchOpen(false)} onStop={() => void stopActiveRun()} onApply={(angle) => { setResearchOpen(false); applyAngle(angle); }} />}
+      {setupOpen && <FirstRunSetupModal settings={setupDraft} onChange={setSetupDraft} bridgeState={bridgeState} report={doctorReport} loading={doctorLoading} onCheck={() => void checkCodexConnection()} onCopy={(command) => void copySetupCommand(command)} onSave={saveSetupProfile} onClose={() => setSetupOpen(false)} />}
       {historyOpen && <HistoryArchiveModal form={historyForm} onChange={setHistoryForm} onTogglePlatform={toggleHistoryPlatform} onMetric={updateHistoryMetric} onSave={addHistoricalContent} onClose={() => setHistoryOpen(false)} />}
       {notice && <div className="toast" role="status">{notice}</div>}
     </div>
@@ -1882,6 +1928,43 @@ function safeExternalUrl(value: string) {
   } catch {
     return "";
   }
+}
+
+function SetupGuidePanel({ configured, bridgeState, onOpen }: {
+  configured: boolean;
+  bridgeState: "checking" | "connected" | "offline";
+  onOpen: () => void;
+}) {
+  const ready = configured && bridgeState === "connected";
+  return <section className="panel setup-guide-panel">
+    <div className="connection-head"><div><span className="eyebrow">GETTING STARTED</span><h2>首次使用向导</h2></div><strong className={`connection-summary ${ready ? "summary-pass" : "summary-warn"}`}>{ready ? "设置完成" : "还有步骤"}</strong></div>
+    <p>其他电脑首次运行时，按顺序完成本地启动、Codex 登录和账号资料设置。</p>
+    <div className="setup-mini-steps"><span className={bridgeState === "connected" ? "done" : ""}>1 本地服务</span><span className={bridgeState === "connected" ? "done" : ""}>2 Codex 连接</span><span className={configured ? "done" : ""}>3 账号资料</span></div>
+    <button className="secondary-button" onClick={onOpen}>{ready ? "重新查看使用向导" : "继续完成设置"}</button>
+  </section>;
+}
+
+function FirstRunSetupModal({ settings, onChange, bridgeState, report, loading, onCheck, onCopy, onSave, onClose }: {
+  settings: Settings;
+  onChange: (settings: Settings) => void;
+  bridgeState: "checking" | "connected" | "offline";
+  report: DoctorReport | null;
+  loading: boolean;
+  onCheck: () => void;
+  onCopy: (command: string) => void;
+  onSave: () => void;
+  onClose: () => void;
+}) {
+  const codexReady = bridgeState === "connected" && report?.checks.every((check) => check.status !== "fail");
+  const field = (key: keyof Pick<Settings, "name" | "role" | "experience" | "audience" | "style" | "goal">, value: string) => onChange({ ...settings, [key]: value });
+  return <div className="modal-backdrop" role="presentation"><section className="task-modal first-run-modal" role="dialog" aria-modal="true" aria-labelledby="first-run-title"><div className="modal-heading"><div><span className="eyebrow">LOCAL FIRST RUN</span><h2 id="first-run-title">三步完成本地连接</h2><p>资料和生成结果只保存在这台电脑，不需要填写模型 API Key。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭首次使用向导">×</button></div>
+    <div className="first-run-steps">
+      <section><span className="setup-step-number">01</span><div><h3>启动内容工作站</h3><p>首次下载仓库后安装依赖，以后只需运行一条启动命令。</p><div className="command-list"><button onClick={() => onCopy("npm install")}><code>npm install</code><small>首次运行</small></button><button onClick={() => onCopy("npm run dev:local")}><code>npm run dev:local</code><small>以后启动</small></button></div></div></section>
+      <section><span className="setup-step-number">02</span><div><h3>连接本机 Codex</h3><p>工作站复用 Codex CLI 登录状态。未安装时先安装，然后通过浏览器完成 ChatGPT 登录。</p><div className="command-list three"><button onClick={() => onCopy("npm install --global @openai/codex")}><code>npm install --global @openai/codex</code><small>安装 Codex</small></button><button onClick={() => onCopy("codex login")}><code>codex login</code><small>登录</small></button><button onClick={() => onCopy("codex login status")}><code>codex login status</code><small>查看状态</small></button></div><div className="setup-check-row"><span className={`connection-summary ${codexReady ? "summary-pass" : bridgeState === "offline" ? "summary-fail" : "summary-warn"}`}>{codexReady ? "Codex 可以使用" : bridgeState === "offline" ? "本地服务未连接" : "等待完整检测"}</span><button className="secondary-button" onClick={onCheck} disabled={loading}>{loading ? "正在检测…" : "检测 Codex 连接"}</button></div></div></section>
+      <section><span className="setup-step-number">03</span><div><h3>填写你的账号资料</h3><p>这些信息会作为每次生成的稳定背景，不会提交到 Git 仓库。</p><div className="setup-profile-grid"><label>称呼<input value={settings.name} onChange={(event) => field("name", event.target.value)} /></label><label>当前身份<input value={settings.role} onChange={(event) => field("role", event.target.value)} /></label><label className="full">真实经历<textarea value={settings.experience} onChange={(event) => field("experience", event.target.value)} /></label><label className="full">目标受众<textarea value={settings.audience} onChange={(event) => field("audience", event.target.value)} /></label><label className="full">表达风格<textarea value={settings.style} onChange={(event) => field("style", event.target.value)} /></label><label className="full">内容与商业目标<textarea value={settings.goal} onChange={(event) => field("goal", event.target.value)} /></label></div></div></section>
+    </div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>稍后设置</button><button className="primary-button" onClick={onSave}>保存并开始使用</button></div>
+  </section></div>;
 }
 
 function CodexConnectionPanel({ bridgeState, bridgeInfo, report, loading, onCheck }: {
