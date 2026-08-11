@@ -32,6 +32,8 @@ test("CI uses Fake Runner tests and real Codex smoke tests require explicit conf
   assert.equal(packageJson.scripts["test:ci"], "npm run lint && npm test");
   assert.equal(packageJson.scripts["smoke:codex"], "node scripts/smoke-codex-local.mjs");
   assert.match(workflow, /npm run test:ci/);
+  assert.match(workflow, /actions\/checkout@v7/);
+  assert.match(workflow, /actions\/setup-node@v7/);
   assert.doesNotMatch(workflow, /smoke:codex|test:codex/);
 
   const help = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });

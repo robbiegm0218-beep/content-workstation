@@ -560,12 +560,13 @@ npm run dev:local
 
 #### B2 Fake Runner CI 与真实 Codex 冒烟入口验收（2026-08-11）
 
-- 新增 GitHub Actions 工作流，使用只读仓库权限和 Node.js 22，在 push/PR 上执行 `npm ci` 与 `npm run test:ci`。
+- 新增 GitHub Actions 工作流，使用只读仓库权限、官方 Actions v7 和 Node.js 22，在 push/PR 上执行 `npm ci` 与 `npm run test:ci`。
 - CI 路径只运行现有 Fake Runner Bridge 集成测试，不安装 Codex、不读取登录状态、不调用图片生成，也不消耗真实 Codex 额度。
 - 新增统一 `npm run smoke:codex -- <scope> --yes` 入口，支持 `content`、`html`、`cover`、`bridge`、`cancel` 和 `full`；未提供 `--yes` 时以退出码 2 拒绝执行。
 - 真实入口执行前检查 Codex CLI 与 `codex login status`，错误时给出安装或登录命令；`cover/full` 在 README 中明确标注耗时与额度成本更高。
 - 本地以与 GitHub 相同的 `npm run test:ci` 完成 lint、生产构建和 28 项测试。工作流测试确认 CI 文件不包含任何真实冒烟命令。
 - 真实 `content` 冒烟成功，thread ID 为 `019ff0f3-2b46-7783-bf3a-3b500fd161ae`，获得 8 个 JSONL 事件、`CW-SKILL-1.0` 标记、3 个副标题候选和 9 个时间轴节点。
+- 首次远端运行在 42 秒内通过；根据 GitHub 的 Node.js 20 弃用提醒，将 `actions/checkout` 与 `actions/setup-node` 升级到官方当前稳定 v7，等待最终远端复验。
 - 阶段结论：C27、C28 完成，可以进入 B3 的隐私扫描与干净目录克隆验收。
 
 ## 12. 测试策略
