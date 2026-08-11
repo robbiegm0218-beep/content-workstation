@@ -35,6 +35,15 @@
 
 ### 第一次运行
 
+如果 SSH 克隆提示 `Permission denied (publickey)`，可直接使用公开 HTTPS 地址：
+
+```bash
+git clone https://github.com/robbiegm0218-beep/content-workstation.git
+cd content-workstation
+```
+
+进入项目目录后执行：
+
 ```bash
 npm install
 npm install --global @openai/codex
@@ -70,6 +79,8 @@ npm test
 GitHub Actions 运行 `npm run test:ci`，其中 Bridge 集成测试使用 Fake Runner，不要求安装或登录 Codex，也不会消耗 Codex 额度。
 
 CI 会先运行 `npm run check:privacy`，检查所有 Git 跟踪文件是否包含真实密钥、认证文件、`.data/work/outputs` 本机数据或用户目录绝对路径。提交前也可以单独运行这条命令。
+
+首次安装若 `npm audit` 报告间接依赖风险，请先查看具体依赖链并采用兼容升级，不要直接执行 `npm audit fix --force`；强制升级可能破坏 Next.js、测试工具或本地 Bridge 的兼容性。
 
 需要在本机验证真实 Codex 时，必须明确选择范围并添加 `--yes`：
 
