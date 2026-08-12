@@ -112,6 +112,20 @@ npm run smoke:codex -- full --yes
 - ZIP 按 `content/`、`recording/`、`covers/`、`publishing/` 分类，并附带 `README.txt`。
 - ZIP 为即时下载文件，不额外写入项目仓库；原始产物仍保留在对应任务目录中。
 
+## Remotion 视频样片（技术闸门）
+
+仓库已包含独立的 `video-renderer/` V0 样片工程，不改变现有 HTML 录屏功能。当前可使用固定场景 JSON 预览并渲染 30 秒、1920×1080 的 Remotion 样片：
+
+```bash
+npm run video:install
+npm run video:check
+npm run video:studio
+# 或直接渲染样片
+npm run video:render:sample
+```
+
+Studio 使用 `http://localhost:3100/`，与内容工作站的 3000 端口分离。当前阶段尚未接入内容详情和 Codex 动态场景生成；详见 [REMOTION_INTEGRATION_PLAN.md](./REMOTION_INTEGRATION_PLAN.md)。Remotion 使用特殊许可证，个人本地使用与未来向其他用户提供平台的授权条件不同，对外开放前需要再次核对官方条款。
+
 ## 共享代码与后续开放
 
 当前版本适合先推送到 Git，供其他人克隆后本地运行：默认账号资料为通用占位内容，密钥通过 `.env.local` 配置且不会提交，个人内容与任务保留在使用者本机且 `.data` 不进入 Git。若后续要作为在线平台开放，应将内容、案例、平台数据和用户设置迁移到带用户归属的云数据库，并增加登录、权限、数据导出及隐私策略；不应把本机存储直接作为在线版本的数据源。

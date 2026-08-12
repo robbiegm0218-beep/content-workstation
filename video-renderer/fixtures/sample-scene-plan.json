@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0",
+  "title": "RAG后台的流转",
+  "subtitle": "从数据接入到评测上线的完整链路",
+  "sourceMode": "direct-content",
+  "aspectRatio": "16:9",
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "durationInFrames": 900,
+  "theme": {
+    "background": "#07111f",
+    "surface": "#132237",
+    "primary": "#4d8dff",
+    "accent": "#d7ff4f",
+    "text": "#f7f9fc",
+    "muted": "#a9b7cb"
+  },
+  "materials": [],
+  "scenes": [
+    {"id": "scene-opening", "type": "opening", "startFrame": 0, "durationInFrames": 150, "eyebrow": "真实项目现场", "headline": "RAG后台，不是一堆 API", "body": "真正难的，是把每一次质量判断放到正确的位置。", "emphasis": ["先后顺序"], "items": []},
+    {"id": "scene-statement", "type": "statement", "startFrame": 150, "durationInFrames": 150, "eyebrow": "产品判断", "headline": "先画数据流水线，再画后台页面", "body": "如果链路没想清楚，后台做得再全，也只是把问题藏进更多按钮里。", "emphasis": ["后台是质量控制台"], "items": []},
+    {"id": "scene-flow", "type": "flow", "startFrame": 300, "durationInFrames": 150, "eyebrow": "完整链路", "headline": "五个环节，环环都有产品决策", "body": "", "emphasis": [], "items": ["数据接入", "解析切分", "索引构建", "检索生成", "评测上线"]},
+    {"id": "scene-comparison", "type": "comparison", "startFrame": 450, "durationInFrames": 150, "eyebrow": "常见冲突", "headline": "功能堆砌和质量闭环，差别在哪里？", "body": "", "emphasis": [], "items": ["接完接口就认为链路完成", "每个环节都设置可观测指标和准入关卡"]},
+    {"id": "scene-screenshot", "type": "screenshot", "startFrame": 600, "durationInFrames": 150, "eyebrow": "后台落地", "headline": "产品经理真正要盯的，不是按钮数量", "body": "应该看得见问题发生在哪一步，并且能回到数据和规则中修正。", "emphasis": [], "items": ["召回率", "答案命中", "人工通过率"]},
+    {"id": "scene-summary", "type": "summary", "startFrame": 750, "durationInFrames": 150, "eyebrow": "行动总结", "headline": "先把质量关卡画出来，再决定后台做什么", "body": "这会比从接口清单出发，更接近一个真正能上线、能迭代的 RAG 产品。", "emphasis": ["质量关卡"], "items": []}
+  ]
+}

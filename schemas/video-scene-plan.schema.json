@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+    "subtitle": {"type": "string", "maxLength": 180},
+    "sourceMode": {"enum": ["direct-content", "accepted-html"]},
+    "aspectRatio": {"const": "16:9"},
+    "fps": {"const": 30},
+    "width": {"const": 1920},
+    "height": {"const": 1080},
+    "durationInFrames": {"const": 900},
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "background": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "surface": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "primary": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "accent": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "text": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+        "muted": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}
+      },
+      "required": ["background", "surface", "primary", "accent", "text", "muted"]
+    },
+    "materials": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "pattern": "^assets/[A-Za-z0-9][A-Za-z0-9._/-]*\\.(png|jpe?g|svg|mp3|wav|mp4)$"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^scene-[a-z0-9-]+$"},
+          "type": {"enum": ["opening", "statement", "flow", "comparison", "screenshot", "summary"]},
+          "startFrame": {"type": "integer", "minimum": 0, "maximum": 899},
+          "durationInFrames": {"type": "integer", "minimum": 30, "maximum": 300},
+          "eyebrow": {"type": "string", "maxLength": 40},
+          "headline": {"type": "string", "minLength": 1, "maxLength": 80},
+          "body": {"type": "string", "maxLength": 180},
+          "emphasis": {"type": "array", "maxItems": 4, "items": {"type": "string", "maxLength": 30}},
+          "items": {"type": "array", "maxItems": 6, "items": {"type": "string", "maxLength": 60}}
+        },
+        "required": ["id", "type", "startFrame", "durationInFrames", "eyebrow", "headline", "body", "emphasis", "items"]
+      }
+    }
+  },
+  "required": ["schemaVersion", "title", "subtitle", "sourceMode", "aspectRatio", "fps", "width", "height", "durationInFrames", "theme", "materials", "scenes"]
+}

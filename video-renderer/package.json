@@ -1,0 +1,29 @@
+{
+  "name": "content-workstation-video-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts --port=3100",
+    "render:sample": "remotion render src/index.ts ContentWorkstationLandscape output/sample-16x9.mp4 --props=fixtures/sample-scene-plan.json",
+    "still:sample": "remotion still src/index.ts ContentWorkstationLandscape output/sample-poster.png --props=fixtures/sample-scene-plan.json --frame=210",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "validate:sample": "node scripts/validate-scene-plan.mjs fixtures/sample-scene-plan.json"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.508",
+    "@remotion/renderer": "4.0.508",
+    "@remotion/transitions": "4.0.508",
+    "ajv": "8.20.0",
+    "remotion": "4.0.508",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "typescript": "5.9.3"
+  }
+}
