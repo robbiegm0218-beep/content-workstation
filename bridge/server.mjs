@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createReadStream } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createBridgeConfig, TERMINAL_RUN_STATUSES } from "./config.mjs";
 import { runDoctor } from "./doctor.mjs";
@@ -18,6 +19,7 @@ import { TaskManager } from "./task-manager.mjs";
 import { WorkspaceManager } from "./workspace-manager.mjs";
 import { WorkstationStateStore } from "./workstation-state-store.mjs";
 import { buildContentBundle } from "./content-bundle.mjs";
+import { AssetStore } from "./asset-store.mjs";
 
 function publicRun(record) {
   if (!record) return null;
@@ -52,7 +54,9 @@ export async function createBridgeRuntime(options = {}) {
   const config = createBridgeConfig(options.config);
   const token = options.token ?? await loadOrCreateBridgeToken(config.tokenPath);
   const store = options.store ?? new RunStore(config);
-  const workspaceManager = options.workspaceManager ?? new WorkspaceManager(config);
+  const assetStore = options.assetStore ?? new AssetStore(config);
+  await assetStore.initialize();
+  const workspaceManager = options.workspaceManager ?? new WorkspaceManager(config, { assetStore });
   const workstationStateStore = options.workstationStateStore ?? new WorkstationStateStore(config);
   const taskManager = options.taskManager ?? new TaskManager({
     config,
@@ -74,7 +78,7 @@ export async function createBridgeRuntime(options = {}) {
       if (request.method === "OPTIONS") {
         setCommonHeaders(response, origin);
         response.statusCode = 204;
-        response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
+        response.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
         response.setHeader("Access-Control-Allow-Headers", "Authorization,Content-Type");
         response.end();
         return;
@@ -120,6 +124,36 @@ export async function createBridgeRuntime(options = {}) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/v1/assets") {
+        const contentId = url.searchParams.get("contentId") ?? "";
+        sendJson(response, 200, { assets: await assetStore.list(contentId) }, origin);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/assets") {
+        const body = await readJsonBody(request, 205 * 1024 * 1024);
+        sendJson(response, 201, { asset: await assetStore.create(body) }, origin);
+        return;
+      }
+
+      const assetFileMatch = matchPath(url.pathname, /^\/v1\/assets\/([^/]+)\/([^/]+)\/file$/);
+      if (request.method === "GET" && assetFileMatch) {
+        const { metadata, filePath } = await assetStore.get(assetFileMatch[0], assetFileMatch[1]);
+        setCommonHeaders(response, origin);
+        response.statusCode = 200;
+        response.setHeader("Content-Type", metadata.mimeType);
+        response.setHeader("Content-Length", metadata.size);
+        response.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(metadata.name)}`);
+        createReadStream(filePath).pipe(response);
+        return;
+      }
+
+      const assetMatch = matchPath(url.pathname, /^\/v1\/assets\/([^/]+)\/([^/]+)$/);
+      if (request.method === "DELETE" && assetMatch) {
+        sendJson(response, 200, { asset: await assetStore.delete(assetMatch[0], assetMatch[1]) }, origin);
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/v1/exports/content-package") {
         const body = await readJsonBody(request, config.maxBodyBytes);
         const bundle = await buildContentBundle(body, taskManager);
@@ -159,6 +193,13 @@ export async function createBridgeRuntime(options = {}) {
       const retryMatch = matchPath(url.pathname, /^\/v1\/runs\/([^/]+)\/retry$/);
       if (request.method === "POST" && retryMatch) {
         const record = await taskManager.retryRun(retryMatch[0]);
+        sendJson(response, 202, { run: publicRun(record) }, origin);
+        return;
+      }
+
+      const resumeRenderMatch = matchPath(url.pathname, /^\/v1\/runs\/([^/]+)\/resume-render$/);
+      if (request.method === "POST" && resumeRenderMatch) {
+        const record = await taskManager.resumeVideoRender(resumeRenderMatch[0]);
         sendJson(response, 202, { run: publicRun(record) }, origin);
         return;
       }

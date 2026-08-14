@@ -5,13 +5,17 @@ import { runCodex, CodexRunError } from "./codex-runner.mjs";
 import { HttpError, createMinimalCodexEnvironment } from "./security.mjs";
 import { TERMINAL_RUN_STATUSES } from "./config.mjs";
 import { createTaskSpecification, finalizeTaskResult } from "./task-definition.mjs";
+import { runVideoRender } from "./video-render-runner.mjs";
+import { validateVideoRenderManifest } from "./video-render-validator.mjs";
 
 export class TaskManager {
-  constructor({ config, store, workspaceManager, runner = runCodex }) {
+  constructor({ config, store, workspaceManager, runner = runCodex, videoRenderer = runVideoRender, videoRenderValidator = validateVideoRenderManifest }) {
     this.config = config;
     this.store = store;
     this.workspaceManager = workspaceManager;
     this.runner = runner;
+    this.videoRenderer = videoRenderer;
+    this.videoRenderValidator = videoRenderValidator;
     this.active = new Map();
     this.listeners = new Map();
   }
@@ -61,7 +65,9 @@ export class TaskManager {
       startedAt: null,
       completedAt: null,
       error: null,
-      artifactManifest: null
+      artifactManifest: null,
+      progress: 0,
+      phase: "queued"
     };
     await this.store.create(record);
 
@@ -96,7 +102,8 @@ export class TaskManager {
       creatorContext: null,
       contentBrief: null,
       confirmedContent: null,
-      styleConfig: null
+      styleConfig: null,
+      acceptedHtml: null
     };
     const record = {
       runId,
@@ -113,7 +120,9 @@ export class TaskManager {
       startedAt: null,
       completedAt: null,
       error: null,
-      artifactManifest: null
+      artifactManifest: null,
+      progress: 0,
+      phase: "queued"
     };
     await this.store.create(record);
 
@@ -151,6 +160,23 @@ export class TaskManager {
     return this.createRun(input);
   }
 
+  async resumeVideoRender(runId) {
+    if (this.active.size >= this.config.maxConcurrentRuns) throw new HttpError(409, "RUN_LIMIT_REACHED", "Another task is already running");
+    const previous = this.get(runId);
+    if (!previous) throw new HttpError(404, "RUN_NOT_FOUND", "Run not found");
+    if (previous.taskType !== "video-render") throw new HttpError(409, "RUN_NOT_RESUMABLE", "Only video renders can resume from checkpoints");
+    if (!new Set(["failed", "cancelled", "timeout", "interrupted"]).has(previous.status)) throw new HttpError(409, "RUN_NOT_RESUMABLE", "Only an unfinished video render can resume");
+    const input = await this.workspaceManager.readInput(previous);
+    const queued = await this.store.update(runId, {status: "queued", startedAt: null, completedAt: null, error: null, artifactManifest: null, progress: 0, phase: "queued", segmentIndex: 0, segmentCount: 0});
+    await this.#publish(runId, "bridge.run.resumed", {});
+    const controller = new AbortController();
+    const activeRun = {controller, promise: null};
+    activeRun.promise = this.#execute(input, queued, controller.signal).finally(() => this.active.delete(runId));
+    this.active.set(runId, activeRun);
+    activeRun.promise.catch(() => {});
+    return this.store.get(runId);
+  }
+
   async subscribe(runId, listener) {
     if (!this.get(runId)) throw new HttpError(404, "RUN_NOT_FOUND", "Run not found");
     const historical = await this.store.readEvents(runId);
@@ -176,12 +202,9 @@ export class TaskManager {
     await this.store.update(runId, { status: "running", startedAt });
     await this.#publish(runId, "bridge.run.started", { taskType: input.taskType });
 
-    const specification = createTaskSpecification(
-      input,
-      initialRecord.workspace,
-      this.config.taskTimeoutMs[input.taskType]
-    );
+    const specification = input.taskType === "video-render" ? null : createTaskSpecification(input, initialRecord.workspace, this.config.taskTimeoutMs[input.taskType]);
     if (continuation) {
+      if (input.taskType === "video-render") throw new HttpError(409, "RUN_NOT_CONTINUABLE", "Video renders cannot continue; retry after changing inputs");
       specification.prompt = [
         `继续之前的 ${input.taskType} 任务。`,
         `本次修改要求文件：${continuation.continuationPath}`,
@@ -190,34 +213,50 @@ export class TaskManager {
       ].join("\n");
     }
     const eventWrites = [];
+    let lastRenderPercent = -1;
 
     try {
       if (abortSignal.aborted) {
         throw new CodexRunError("Codex run was cancelled before Runner start", { reason: "cancelled" });
       }
-      const result = await this.runner({
-        ...specification,
-        cwd: initialRecord.workspace,
-        ephemeral: false,
-        signal: abortSignal,
-        resumeThreadId: continuation?.resumeThreadId ?? null,
-        env: createMinimalCodexEnvironment(),
-        onEvent: (event) => {
-          const write = this.#publish(runId, "codex.event", { event });
-          eventWrites.push(write);
+      const eventHandler = (event) => {
+        const write = this.#publish(runId, input.taskType === "video-render" ? "render.event" : "codex.event", { event });
+        eventWrites.push(write);
+        if (input.taskType === "video-render") {
+          const progress = event.type === "render.progress" ? Math.round(Number(event.progress || 0) * 100) : event.type === "bundle.progress" ? Math.min(15, Math.round(Number(event.progress || 0) * 15)) : null;
+          const phase = event.type === "bundle.progress" ? "bundling" : event.type === "render.progress" ? "rendering" : event.type === "render.completed" ? "validating" : null;
+          if (progress !== null && (progress >= lastRenderPercent + 2 || progress === 100)) {
+            lastRenderPercent = progress;
+            eventWrites.push(this.store.update(runId, { progress, phase }));
+          }
+          if (event.type === "render.segment.started" || event.type === "render.segment.reused") {
+            eventWrites.push(this.store.update(runId, {phase: "rendering", segmentIndex: event.index, segmentCount: event.count}));
+          }
+          if (event.type === "render.merging") eventWrites.push(this.store.update(runId, {phase: "merging", segmentIndex: event.count, segmentCount: event.count}));
         }
-      });
+      };
+      const result = input.taskType === "video-render"
+        ? { threadId: null, structuredResult: await this.videoRenderer({ workspace: initialRecord.workspace, projectRoot: this.config.projectRoot, signal: abortSignal, timeoutMs: this.config.taskTimeoutMs["video-render"], onEvent: eventHandler }) }
+        : await this.runner({
+          ...specification,
+          cwd: initialRecord.workspace,
+          ephemeral: false,
+          signal: abortSignal,
+          resumeThreadId: continuation?.resumeThreadId ?? null,
+          env: createMinimalCodexEnvironment(),
+          onEvent: eventHandler
+        });
       await Promise.all(eventWrites);
-      const artifactManifest = await finalizeTaskResult(
-        input,
-        initialRecord.workspace,
-        result.structuredResult
-      );
+      const artifactManifest = input.taskType === "video-render"
+        ? await this.videoRenderValidator(initialRecord.workspace, result.structuredResult)
+        : await finalizeTaskResult(input, initialRecord.workspace, result.structuredResult);
       const completed = await this.store.update(runId, {
         status: "completed",
         threadId: result.threadId,
         completedAt: new Date().toISOString(),
         artifactManifest,
+        progress: 100,
+        phase: "completed",
         error: null
       });
       await this.#publish(runId, "bridge.run.completed", { artifactManifest });

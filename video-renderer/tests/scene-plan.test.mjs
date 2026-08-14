@@ -20,6 +20,19 @@ test('accepts the fixed 30 second sample plan', () => {
   assert.match(result.stdout, /6 scenes, 30s, 1920x1080/);
 });
 
+test('accepts an independent 9:16 portrait contract', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'cw-video-portrait-'));
+  const portrait = JSON.parse(await readFile(samplePath, 'utf8'));
+  portrait.aspectRatio = '9:16';
+  portrait.width = 1080;
+  portrait.height = 1920;
+  const portraitPath = path.join(directory, 'portrait.json');
+  await writeFile(portraitPath, JSON.stringify(portrait));
+  const result = run(portraitPath);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /1080x1920/);
+});
+
 test('rejects unknown fields, excessive duration, and unsafe material paths', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'cw-video-plan-'));
   const sample = JSON.parse(await readFile(samplePath, 'utf8'));
@@ -41,4 +54,21 @@ test('rejects unknown fields, excessive duration, and unsafe material paths', as
   const unsafePath = path.join(directory, 'unsafe.json');
   await writeFile(unsafePath, JSON.stringify(unsafe));
   assert.notEqual(run(unsafePath).status, 0);
+});
+
+test('rejects undeclared material references and incomplete HTML traceability', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'cw-video-trace-'));
+  const sample = JSON.parse(await readFile(samplePath, 'utf8'));
+
+  const undeclared = structuredClone(sample);
+  undeclared.scenes[0].materialIds = ['assets/missing.png'];
+  const undeclaredPath = path.join(directory, 'undeclared.json');
+  await writeFile(undeclaredPath, JSON.stringify(undeclared));
+  assert.notEqual(run(undeclaredPath).status, 0);
+
+  const htmlPlan = structuredClone(sample);
+  htmlPlan.sourceMode = 'accepted-html';
+  const htmlPlanPath = path.join(directory, 'html-plan.json');
+  await writeFile(htmlPlanPath, JSON.stringify(htmlPlan));
+  assert.notEqual(run(htmlPlanPath).status, 0);
 });

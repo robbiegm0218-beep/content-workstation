@@ -5,7 +5,7 @@ export type BridgeRunStatus = "queued" | "running" | "completed" | "failed" | "c
 export type BridgeRun = {
   runId: string;
   contentId: string;
-  taskType: "research" | "angles" | "content" | "html" | "cover" | "publishing";
+  taskType: "research" | "angles" | "content" | "html" | "cover" | "publishing" | "video-plan" | "video-render";
   contentVersion: number;
   status: BridgeRunStatus;
   threadId: string | null;
@@ -15,6 +15,10 @@ export type BridgeRun = {
   error: { code: string; message: string } | null;
   parentRunId?: string;
   updatedAt?: string;
+  progress?: number;
+  phase?: "queued" | "bundling" | "rendering" | "merging" | "validating" | "completed";
+  segmentIndex?: number;
+  segmentCount?: number;
 };
 
 export type ContentResult = {
@@ -84,6 +88,67 @@ export type ArtifactManifest = {
     height: number | null;
     sha256: string;
   }>;
+  notes: string[];
+};
+
+export type VideoScene = {
+  id: string;
+  type: "opening" | "statement" | "flow" | "comparison" | "screenshot" | "summary";
+  startFrame: number;
+  durationInFrames: number;
+  eyebrow: string;
+  headline: string;
+  body: string;
+  emphasis: string[];
+  items: string[];
+  narration: string;
+  transition: "none" | "fade" | "slide" | "wipe";
+  showCaptions: boolean;
+  materialIds: string[];
+};
+
+export type VideoScenePlan = {
+  schemaVersion: "1.0";
+  title: string;
+  subtitle: string;
+  sourceMode: "direct-content" | "accepted-html";
+  aspectRatio: "16:9" | "9:16";
+  fps: 30;
+  width: 1920 | 1080;
+  height: 1080 | 1920;
+  durationInFrames: 900 | 9000 | 14400;
+  sourceTrace: { htmlRunId: string; htmlSha256: string; htmlSections: string[] };
+  theme: Record<"background" | "surface" | "primary" | "accent" | "text" | "muted", string>;
+  materials: string[];
+  scenes: VideoScene[];
+  missingMaterials: string[];
+  generationMeta: { skillName: "content-workstation-creator"; skillEvidence: "CW-SKILL-1.0"; researchUsed: false };
+};
+
+export type LocalAsset = {
+  assetId: string;
+  contentId: string;
+  name: string;
+  mimeType: string;
+  kind: "image" | "audio" | "video" | "captions";
+  size: number;
+  filename: string;
+  relativePath: string;
+  createdAt: string;
+};
+
+export type VideoRenderManifest = {
+  manifestVersion: "1.0";
+  taskType: "video-render";
+  generationMode: "remotion-local-render";
+  templateVersion: string;
+  remotionVersion: string;
+  width: 1920 | 1080;
+  height: 1080 | 1920;
+  fps: 30;
+  durationInFrames: 900 | 9000 | 14400;
+  durationSeconds: number;
+  artifacts: Array<{ id: "video-mp4" | "video-poster"; type: "video-mp4" | "video-poster"; path: string; mimeType: string; width: 1920 | 1080; height: 1080 | 1920; size: number; sha256: string }>;
   notes: string[];
 };
 
@@ -194,6 +259,52 @@ export async function createVisualRun(input: {
   }));
 }
 
+export async function createVideoPlanRun(input: {
+  contentId: string;
+  contentVersion: number;
+  confirmedContent: string;
+  styleConfig: Record<string, unknown>;
+  acceptedHtml?: string;
+  instruction?: string;
+}) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch("/v1/runs", {
+    method: "POST",
+    body: JSON.stringify({ ...input, taskType: "video-plan" }),
+  }));
+}
+
+export async function createVideoRenderRun(input: {
+  contentId: string;
+  contentVersion: number;
+  scenePlan: VideoScenePlan;
+  assetIds: string[];
+  audioAssetId?: string;
+  captionsAssetId?: string;
+}) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch("/v1/runs", {
+    method: "POST",
+    body: JSON.stringify({ ...input, taskType: "video-render" }),
+  }));
+}
+
+export async function uploadLocalAsset(input: { contentId: string; name: string; mimeType: string; dataBase64: string }) {
+  return readJson<{ asset: LocalAsset }>(await authorizedFetch("/v1/assets", { method: "POST", body: JSON.stringify(input) }));
+}
+
+export async function listLocalAssets(contentId: string) {
+  return readJson<{ assets: LocalAsset[] }>(await authorizedFetch(`/v1/assets?contentId=${encodeURIComponent(contentId)}`));
+}
+
+export async function deleteLocalAsset(contentId: string, assetId: string) {
+  return readJson<{ asset: LocalAsset }>(await authorizedFetch(`/v1/assets/${encodeURIComponent(contentId)}/${encodeURIComponent(assetId)}`, { method: "DELETE" }));
+}
+
+export async function getLocalAssetBlob(contentId: string, assetId: string) {
+  const response = await authorizedFetch(`/v1/assets/${encodeURIComponent(contentId)}/${encodeURIComponent(assetId)}/file`);
+  if (!response.ok) throw new Error(`读取本地素材失败（${response.status}）`);
+  return response.blob();
+}
+
 export async function continueBridgeRun(runId: string, instruction: string) {
   return readJson<{ run: BridgeRun }>(await authorizedFetch(`/v1/runs/${encodeURIComponent(runId)}/continue`, {
     method: "POST",
@@ -219,6 +330,10 @@ export async function retryBridgeRun(runId: string) {
   }));
 }
 
+export async function resumeVideoRenderRun(runId: string) {
+  return readJson<{ run: BridgeRun }>(await authorizedFetch(`/v1/runs/${encodeURIComponent(runId)}/resume-render`, {method: "POST", body: "{}"}));
+}
+
 export async function getContentResult(runId: string) {
   return readJson<ContentResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/content-result`));
 }
@@ -231,8 +346,16 @@ export async function getTopicResearchResult(runId: string) {
   return readJson<TopicResearchResult>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/topic-research-result`));
 }
 
+export async function getVideoScenePlan(runId: string) {
+  return readJson<VideoScenePlan>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/file/video-scene-plan`));
+}
+
 export async function getArtifactManifest(runId: string) {
   return readJson<ArtifactManifest>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/manifest`));
+}
+
+export async function getVideoRenderManifest(runId: string) {
+  return readJson<VideoRenderManifest>(await authorizedFetch(`/v1/artifacts/${encodeURIComponent(runId)}/manifest`));
 }
 
 export async function getArtifactBlob(runId: string, artifactId: string) {
@@ -250,7 +373,8 @@ export async function getContentBundle(input: {
   subtitle: string;
   platforms: string[];
   script: string;
-  runIds: { html?: string; cover?: string; publishing?: string };
+  runIds: { html?: string; cover?: string; publishing?: string; "video-render"?: string };
+  videoPlan?: VideoScenePlan | null;
 }) {
   const response = await authorizedFetch("/v1/exports/content-package", {
     method: "POST",

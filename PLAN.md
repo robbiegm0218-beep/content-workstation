@@ -99,7 +99,13 @@
 | T69 | [x] | 发布本地直连 v0.1.0 | 安全升级、全量测试与远端 CI 通过，快进 main 并创建版本标签 |
 | T70 | [x] | 完成 Remotion 集成执行规划 | 明确 HTML 保留、三条制作路线、独立渲染器、Codex 场景任务、20 项开发任务与分批闸门 |
 | T71 | [x] | 执行 Remotion V0 技术闸门 | Remotion 4.0.508 独立安装；六场景、30 秒 16:9 样片在 20.23 秒内成功渲染，HTML 链路未修改 |
-| T72 | [ ] | 执行 Remotion V1 Codex 场景方案 | 新增 `video-plan` 任务、HTML 演化输入、视频选择状态和可编辑场景方案，不在本批渲染动态 MP4 |
+| T72 | [x] | 执行 Remotion V1 Codex 场景方案 | 已新增 `video-plan` 任务、已验收 HTML 快照、独立视频选择与状态、逐场编辑和人工确认；本批不渲染动态 MP4 |
+| T73 | [x] | 执行 Remotion V2 素材与本地渲染 | 已增加安全素材登记、旁白/字幕、Remotion Player、本地渲染、停止与 MP4/poster 验收；真实 30 秒渲染及 35 项回归通过 |
+| T74 | [x] | 执行 Remotion V3 交付与回归 | 已完成精确失效规则、视频 ZIP、Fake Renderer CI、状态回滚与三模式真实冒烟；Bridge 36 项测试通过 |
+| T75 | [x] | 执行 Remotion V4 真实内容验收 | 同一真实选题已完成直接视频与 HTML 演化视频；对比与结论见 `V4_VIDEO_ACCEPTANCE_REPORT.md` |
+| T76 | [x] | 执行 Remotion V5 竖屏独立构图 | 工作站可选 16:9 / 9:16；竖屏采用独立 Composition，真实 1080×1920 样片与自动验收通过，详见 `V5_PORTRAIT_ACCEPTANCE_REPORT.md` |
+| T77 | [x] | 执行 Remotion V5 长视频分段渲染 | 支持 30 秒 / 5 分钟 / 8 分钟合同、场景边界分段、进度反馈和同任务断点续渲；5 分钟真实成片验收见 `V5_LONG_VIDEO_ACCEPTANCE_REPORT.md` |
+| T78 | [x] | 执行 Remotion V5 安装与环境提示 | Doctor 与设置页检测 Remotion 包、Headless Chrome、FFmpeg/FFprobe；首次向导、README 与许可证边界已补齐 |
 
 ## 4. 核心数据对象
 
@@ -122,7 +128,7 @@
 ## 6. 下一阶段候选
 
 1. 收集其他本地用户的首次安装、Codex 登录、生成耗时和失败恢复反馈，作为下一版本优先级依据。
-2. 执行 Remotion V1：先接入 Codex 场景方案和人工确认，再让动态内容进入已经验证的固定渲染器。
+2. 收集真实 5～8 分钟内容的旁白、字幕、素材匹配和渲染耗时反馈，决定下一版视频质量优化优先级。
 3. 按后续反馈继续优化封面风格、标题排版和人物素材策略。
 4. 支持 CSV / Excel 批量导入运营数据，并根据历史数据沉淀高表现选题、开头、结构和封面模板。
 
@@ -153,6 +159,10 @@
 - 真实 Codex `content` 冒烟通过：返回 thread ID、8 个事件、`CW-SKILL-1.0` 标记、3 个副标题候选和 9 个时间轴节点。
 - 当前数据模式：Bridge 的 `.data/workstation-state.json` 为主存储，浏览器 `localStorage` 作为兜底，并支持 JSON 导入与导出。
 - 旧数据兼容：已有内容自动补充“未设置”录制方式，不覆盖原稿件、状态和运营数据。
+- Remotion V3 已完成：内容、HTML、封面、场景和素材按依赖关系精确失效；完整 ZIP 可加入视频方案、MP4 与 poster；状态文件支持上一有效快照回滚。
+- 假渲染器已覆盖进度、完成与取消，Bridge 36 项测试通过；真实 `plan`、`cancel`、`render` 冒烟全部通过，成片 30.06 秒、1920×1080、3.64MB。
+- Remotion V5 长视频验收通过：5 分钟方案按场景边界拆为 5 段；主动中断后复用第 1 段并完成剩余渲染，最终 MP4 为 300.27 秒、1920×1080、约 30.2MB，manifest、哈希与媒体探测均通过。
+- Remotion V5 环境收口完成：Doctor 新增 Remotion 五包版本一致性、专用 Headless Chrome、FFmpeg 和 FFprobe 检测；设置页与四步首次使用向导给出对应修复命令和许可证边界。
 
 ## 8. 选题检索实现决策
 

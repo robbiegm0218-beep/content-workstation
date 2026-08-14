@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HttpError } from "./security.mjs";
 
@@ -31,6 +31,7 @@ export function validateWorkstationState(input) {
 export class WorkstationStateStore {
   constructor(config) {
     this.statePath = path.join(config.dataRoot, "workstation-state.json");
+    this.backupPath = path.join(config.dataRoot, "workstation-state.backup.json");
   }
 
   async read() {
@@ -38,7 +39,14 @@ export class WorkstationStateStore {
       return validateWorkstationState(JSON.parse(await readFile(this.statePath, "utf8")));
     } catch (error) {
       if (error.code === "ENOENT") return null;
-      if (error instanceof SyntaxError) return null;
+      if (error instanceof SyntaxError || error instanceof HttpError) {
+        try {
+          return validateWorkstationState(JSON.parse(await readFile(this.backupPath, "utf8")));
+        } catch (backupError) {
+          if (backupError.code === "ENOENT" || backupError instanceof SyntaxError || backupError instanceof HttpError) return null;
+          throw backupError;
+        }
+      }
       throw error;
     }
   }
@@ -46,6 +54,11 @@ export class WorkstationStateStore {
   async write(input) {
     const state = validateWorkstationState({ ...input, updatedAt: new Date().toISOString() });
     await mkdir(path.dirname(this.statePath), { recursive: true, mode: 0o700 });
+    try {
+      await copyFile(this.statePath, this.backupPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
     const temporary = path.join(path.dirname(this.statePath), `workstation-state-${process.pid}-${Date.now()}.tmp`);
     await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, this.statePath);

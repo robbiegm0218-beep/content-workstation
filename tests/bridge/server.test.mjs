@@ -139,6 +139,22 @@ test("Bridge enforces loopback, Origin, token, task whitelist, persistence and a
   assert.equal(restoredWorkstationState.response.status, 200);
   assert.equal(restoredWorkstationState.body.state.database.settings.name, "Tester");
 
+  const assetBytes = Buffer.from("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n开始\n");
+  const registeredAsset = await jsonRequest(baseUrl, "/v1/assets", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, Origin: "http://localhost:3000", "Content-Type": "application/json" },
+    body: JSON.stringify({ contentId: "content-001", name: "captions.vtt", mimeType: "text/vtt", dataBase64: assetBytes.toString("base64") })
+  });
+  assert.equal(registeredAsset.response.status, 201);
+  assert.equal(registeredAsset.body.asset.kind, "captions");
+  const assetId = registeredAsset.body.asset.assetId;
+  const assetFile = await fetch(`${baseUrl}/v1/assets/content-001/${assetId}/file`, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(assetFile.status, 200);
+  assert.deepEqual(Buffer.from(await assetFile.arrayBuffer()), assetBytes);
+  const deletedAsset = await jsonRequest(baseUrl, `/v1/assets/content-001/${assetId}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(deletedAsset.response.status, 200);
+  assert.equal(deletedAsset.body.asset.assetId, assetId);
+
   const bundleResponse = await fetch(`${baseUrl}/v1/exports/content-package`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, Origin: "http://localhost:3000", "Content-Type": "application/json" },

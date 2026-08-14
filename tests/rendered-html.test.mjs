@@ -47,6 +47,10 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(page, /function SetupGuidePanel/);
   assert.match(page, /npm run dev:local/);
   assert.match(page, /codex login status/);
+  assert.match(page, /npm run video:install/);
+  assert.match(page, /npm run video:browser/);
+  assert.match(page, /Remotion 使用提醒/);
+  assert.match(page, /FFmpeg 媒体工具/);
   assert.match(page, /isProfileConfigured/);
   assert.match(page, /function TaskCenter/);
   assert.match(page, /pollTopicAnglesRun/);
@@ -61,6 +65,10 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(page, /无本人照片时自动改用焦点物体/);
   assert.match(page, /approved-creator-asset-only/);
   assert.match(page, /function VisualGenerationPanel/);
+  assert.match(page, /function VideoPlanPanel/);
+  assert.match(page, /基于已确认 HTML/);
+  assert.match(page, /确认场景方案/);
+  assert.match(page, /copyScene/);
   assert.match(page, /function ArtifactPreview/);
   assert.match(page, /接受这版产物/);
   assert.match(page, /publishingPackageLabel/);
@@ -100,6 +108,8 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(css, /\.visual-generation/);
   assert.match(css, /\.cover-artifact-grid/);
   assert.match(css, /\.publishing-artifact-preview/);
+  assert.match(css, /\.video-plan-panel/);
+  assert.match(css, /\.scene-editor/);
   assert.match(bridgeClient, /\/v1\/session/);
   assert.match(bridgeClient, /createContentRun/);
   assert.match(bridgeClient, /createTopicAnglesRun/);
@@ -110,6 +120,8 @@ test("keeps content, HTML, cover, and publishing production as separate stages",
   assert.match(bridgeClient, /getTopicAnglesResult/);
   assert.match(bridgeClient, /getContentResult/);
   assert.match(bridgeClient, /createVisualRun/);
+  assert.match(bridgeClient, /createVideoPlanRun/);
+  assert.match(bridgeClient, /getVideoScenePlan/);
   assert.match(bridgeClient, /continueBridgeRun/);
   assert.match(bridgeClient, /getArtifactManifest/);
   assert.match(bridgeClient, /getArtifactBlob/);

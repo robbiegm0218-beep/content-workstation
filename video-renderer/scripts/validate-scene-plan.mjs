@@ -17,10 +17,29 @@ if (!validate(data)) {
   process.exit(1);
 }
 
+const expectedDimensions = data.aspectRatio === '9:16' ? {width: 1080, height: 1920} : {width: 1920, height: 1080};
+if (data.width !== expectedDimensions.width || data.height !== expectedDimensions.height) {
+  throw new Error(`Aspect ratio ${data.aspectRatio} must use ${expectedDimensions.width}x${expectedDimensions.height}`);
+}
+if (![900, 9000, 14400].includes(data.durationInFrames)) throw new Error('Unsupported video duration');
+
 let expectedStart = 0;
+const sceneIds = new Set();
+const materialSet = new Set(data.materials);
 for (const scene of data.scenes) {
+  if (sceneIds.has(scene.id)) throw new Error(`Scene id must be unique: ${scene.id}`);
+  sceneIds.add(scene.id);
   if (scene.startFrame !== expectedStart) throw new Error(`Scene ${scene.id} must start at frame ${expectedStart}`);
+  for (const materialId of scene.materialIds) {
+    if (!materialSet.has(materialId)) throw new Error(`Scene ${scene.id} references undeclared material: ${materialId}`);
+  }
   expectedStart += scene.durationInFrames;
 }
 if (expectedStart !== data.durationInFrames) throw new Error('Scene durations must fill the whole composition');
+if (data.sourceMode === 'direct-content' && (data.sourceTrace.htmlRunId || data.sourceTrace.htmlSha256 || data.sourceTrace.htmlSections.length)) {
+  throw new Error('Direct-content plans must keep the HTML source trace empty');
+}
+if (data.sourceMode === 'accepted-html' && (!data.sourceTrace.htmlRunId || !data.sourceTrace.htmlSha256 || data.sourceTrace.htmlSections.length === 0)) {
+  throw new Error('Accepted-HTML plans must include a complete source trace');
+}
 console.log(`Scene plan valid: ${data.scenes.length} scenes, ${data.durationInFrames / data.fps}s, ${data.width}x${data.height}`);

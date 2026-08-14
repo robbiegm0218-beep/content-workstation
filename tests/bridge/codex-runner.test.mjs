@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CodexRunError, createJsonlCollector, runCodex } from "../../bridge/codex-runner.mjs";
+import { CodexRunError, createJsonlCollector, extractCodexFailureMessage, runCodex } from "../../bridge/codex-runner.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 const fakeCodex = path.join(projectRoot, "tests/fixtures/fake-codex.mjs");
@@ -18,6 +18,11 @@ test("JSONL collector handles split lines and extracts the thread id", () => {
   assert.equal(result.lastAgentMessage, "done");
   assert.equal(result.events.length, 2);
   assert.deepEqual(result.parseErrors, []);
+});
+
+test("runner extracts the actionable API error from nested Codex events", () => {
+  const nested = JSON.stringify({ error: { message: "Invalid schema: schemaVersion must have a type" } });
+  assert.equal(extractCodexFailureMessage([{ type: "turn.failed", error: { message: nested } }]), "Invalid schema: schemaVersion must have a type");
 });
 
 test("runner reports successful completion", async () => {

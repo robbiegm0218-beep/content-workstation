@@ -63,6 +63,26 @@ export function createJsonlCollector(onEvent = () => {}) {
   };
 }
 
+export function extractCodexFailureMessage(events = [], stderr = "", fallback = "Codex task failed") {
+  const candidates = [];
+  for (const event of [...events].reverse()) {
+    if (event?.type === "turn.failed" && event.error?.message) candidates.push(event.error.message);
+    if (event?.type === "error" && event.message) candidates.push(event.message);
+  }
+  if (stderr.trim()) candidates.push(stderr.trim());
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.trim()) continue;
+    try {
+      const parsed = JSON.parse(candidate);
+      const detail = parsed?.error?.message || parsed?.message;
+      if (typeof detail === "string" && detail.trim()) return detail.trim();
+    } catch {
+      return candidate.trim();
+    }
+  }
+  return fallback;
+}
+
 export async function runCodex({
   prompt,
   cwd,
@@ -175,7 +195,7 @@ export async function runCodex({
     });
   }
   if (exit.code !== 0) {
-    throw new CodexRunError(`Codex exited with code ${exit.code}`, {
+    throw new CodexRunError(extractCodexFailureMessage(parsed.events, stderr, `Codex exited with code ${exit.code}`), {
       ...exit,
       stderr,
       ...parsed

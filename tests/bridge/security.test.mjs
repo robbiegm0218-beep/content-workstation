@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { createMinimalCodexEnvironment, validateCreateRunInput } from "../../bridge/security.mjs";
 
@@ -17,7 +19,7 @@ test("run input rejects unknown command-like fields", () => {
   );
   assert.throws(
     () => validateCreateRunInput({ ...contentInput, taskType: "shell" }),
-    /taskType must be/
+    /taskType is not supported/
   );
 });
 
@@ -74,6 +76,32 @@ test("topic research tasks use the same bounded structured input", () => {
   );
 });
 
+test("video plans require an explicit source and an accepted HTML snapshot when selected", () => {
+  const base = {
+    contentId: "video-plan-001",
+    taskType: "video-plan",
+    contentVersion: 1,
+    confirmedContent: "approved content",
+    styleConfig: { sourceMode: "direct-content", style: "流程图演示" }
+  };
+  assert.doesNotThrow(() => validateCreateRunInput(base));
+  assert.doesNotThrow(() => validateCreateRunInput({ ...base, styleConfig: { ...base.styleConfig, aspectRatio: "9:16" } }));
+  assert.throws(() => validateCreateRunInput({ ...base, styleConfig: { ...base.styleConfig, aspectRatio: "1:1" } }), /aspectRatio/);
+  assert.throws(
+    () => validateCreateRunInput({ ...base, styleConfig: { sourceMode: "accepted-html" } }),
+    /acceptedHtml is required/
+  );
+  assert.doesNotThrow(() => validateCreateRunInput({
+    ...base,
+    styleConfig: { sourceMode: "accepted-html" },
+    acceptedHtml: "<!doctype html><html><body>accepted</body></html>"
+  }));
+  assert.throws(
+    () => validateCreateRunInput({ ...base, styleConfig: { sourceMode: "remote-url" } }),
+    /sourceMode must be/
+  );
+});
+
 test("Codex receives a minimal environment without unrelated secrets", () => {
   const environment = createMinimalCodexEnvironment({
     PATH: "/bin",
@@ -87,4 +115,22 @@ test("Codex receives a minimal environment without unrelated secrets", () => {
     HOME: "/tmp/example-home",
     CODEX_HOME: "/tmp/codex-home"
   });
+});
+
+test("video renders require a valid plan and explicitly registered inputs", async () => {
+  const scenePlan = JSON.parse(await readFile(path.resolve(import.meta.dirname, "../../video-renderer/fixtures/sample-scene-plan.json"), "utf8"));
+  const audioAssetId = "asset-11111111-1111-4111-8111-111111111111";
+  const base = {
+    contentId: "video-render-001",
+    taskType: "video-render",
+    contentVersion: 1,
+    scenePlan,
+    assetIds: [audioAssetId],
+    audioAssetId,
+    captionsAssetId: ""
+  };
+  assert.doesNotThrow(() => validateCreateRunInput(base));
+  assert.throws(() => validateCreateRunInput({ ...base, assetIds: [audioAssetId, audioAssetId] }), /must not contain duplicates/);
+  assert.throws(() => validateCreateRunInput({ ...base, assetIds: [] }), /must also appear in assetIds/);
+  assert.throws(() => validateCreateRunInput({ ...base, scenePlan: { ...scenePlan, durationInFrames: 899 } }), /supported 30 second, 5 minute, or 8 minute contract/);
 });

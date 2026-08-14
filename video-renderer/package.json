@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "browser:ensure": "remotion browser ensure",
     "studio": "remotion studio src/index.ts --port=3100",
     "render:sample": "remotion render src/index.ts ContentWorkstationLandscape output/sample-16x9.mp4 --props=fixtures/sample-scene-plan.json",
     "still:sample": "remotion still src/index.ts ContentWorkstationLandscape output/sample-poster.png --props=fixtures/sample-scene-plan.json --frame=210",

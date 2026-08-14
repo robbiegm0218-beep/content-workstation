@@ -6,8 +6,9 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export class WorkspaceManager {
-  constructor(config) {
+  constructor(config, options = {}) {
     this.config = config;
+    this.assetStore = options.assetStore ?? null;
   }
 
   async initialize() {
@@ -51,6 +52,14 @@ export class WorkspaceManager {
       path.join(this.config.projectRoot, "schemas/artifact-manifest.schema.json"),
       path.join(workspace, "schemas/artifact-manifest.schema.json")
     );
+    await cp(
+      path.join(this.config.projectRoot, "schemas/video-scene-plan.schema.json"),
+      path.join(workspace, "schemas/video-scene-plan.schema.json")
+    );
+    await cp(
+      path.join(this.config.projectRoot, "schemas/video-render-manifest.schema.json"),
+      path.join(workspace, "schemas/video-render-manifest.schema.json")
+    );
 
     const taskSnapshot = {
       runId,
@@ -73,6 +82,19 @@ export class WorkspaceManager {
         `${JSON.stringify(input.contentBrief, null, 2)}\n`,
         { mode: 0o600 }
       );
+    } else if (input.taskType === "video-render") {
+      if (!this.assetStore) throw new Error("Asset store is required for video rendering");
+      await writeFile(path.join(workspace, "input/video-scene-plan.json"), `${JSON.stringify(input.scenePlan, null, 2)}\n`, { mode: 0o600 });
+      const publicAssets = path.join(workspace, ".render-public/assets");
+      const copied = [];
+      for (const assetId of input.assetIds) copied.push(await this.assetStore.copyTo(input.contentId, assetId, publicAssets));
+      const byId = new Map(copied.map((asset) => [asset.assetId, asset]));
+      const audio = input.audioAssetId ? byId.get(input.audioAssetId) : null;
+      const captions = input.captionsAssetId ? byId.get(input.captionsAssetId) : null;
+      if (audio && audio.kind !== "audio") throw new Error("Selected voiceover asset is not audio");
+      if (captions && captions.kind !== "captions") throw new Error("Selected captions asset is not a subtitle file");
+      const assetKindMap = Object.fromEntries(copied.filter((asset) => asset.kind === "image" || asset.kind === "video").map((asset) => [asset.relativePath, asset.kind]));
+      await writeFile(path.join(workspace, "input/render-config.json"), `${JSON.stringify({ audioPath: audio?.relativePath ?? "", captionsPath: captions?.relativePath ?? "", assetKindMap }, null, 2)}\n`, { mode: 0o600 });
     } else {
       await writeFile(path.join(workspace, "input/confirmed-content.md"), input.confirmedContent, { mode: 0o600 });
       await writeFile(
@@ -80,6 +102,9 @@ export class WorkspaceManager {
         `${JSON.stringify(input.styleConfig, null, 2)}\n`,
         { mode: 0o600 }
       );
+      if (input.taskType === "video-plan" && input.acceptedHtml) {
+        await writeFile(path.join(workspace, "input/accepted-presentation.html"), input.acceptedHtml, { mode: 0o600 });
+      }
     }
 
     await execFileAsync("git", ["init", "--quiet"], { cwd: workspace });
@@ -99,14 +124,29 @@ export class WorkspaceManager {
       creatorContext: null,
       contentBrief: null,
       confirmedContent: null,
-      styleConfig: null
+      styleConfig: null,
+      acceptedHtml: null,
+      scenePlan: null,
+      assetIds: [],
+      audioAssetId: "",
+      captionsAssetId: ""
     };
     if (record.taskType === "research" || record.taskType === "angles" || record.taskType === "content") {
       base.creatorContext = JSON.parse(await readFile(path.join(workspace, "input/creator-context.json"), "utf8"));
       base.contentBrief = JSON.parse(await readFile(path.join(workspace, "input/content-brief.json"), "utf8"));
+    } else if (record.taskType === "video-render") {
+      base.scenePlan = JSON.parse(await readFile(path.join(workspace, "input/video-scene-plan.json"), "utf8"));
+      const config = JSON.parse(await readFile(path.join(workspace, "input/render-config.json"), "utf8"));
+      const assets = await this.assetStore.list(record.contentId);
+      base.assetIds = assets.filter((asset) => base.scenePlan.materials.includes(asset.relativePath) || asset.relativePath === config.audioPath || asset.relativePath === config.captionsPath).map((asset) => asset.assetId);
+      base.audioAssetId = assets.find((asset) => asset.relativePath === config.audioPath)?.assetId ?? "";
+      base.captionsAssetId = assets.find((asset) => asset.relativePath === config.captionsPath)?.assetId ?? "";
     } else {
       base.confirmedContent = await readFile(path.join(workspace, "input/confirmed-content.md"), "utf8");
       base.styleConfig = JSON.parse(await readFile(path.join(workspace, "input/style-config.json"), "utf8"));
+      if (record.taskType === "video-plan" && base.styleConfig.sourceMode === "accepted-html") {
+        base.acceptedHtml = await readFile(path.join(workspace, "input/accepted-presentation.html"), "utf8");
+      }
     }
     return base;
   }

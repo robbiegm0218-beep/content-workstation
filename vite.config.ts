@@ -44,9 +44,13 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    // The Remotion renderer is a workspace subproject with its own install.
+    // Force previews to share the workstation's React instance to avoid invalid hooks.
+    resolve: { dedupe: ["react", "react-dom", "remotion"] },
+    server: {
+      host: "127.0.0.1",
+      ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
+    },
     plugins: [
       vinext(),
       sites(),

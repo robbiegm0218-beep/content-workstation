@@ -1,4 +1,5 @@
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { TERMINAL_RUN_STATUSES } from "./config.mjs";
 
@@ -7,6 +8,7 @@ export class RunStore {
     this.runsRoot = path.join(config.dataRoot, "runs");
     this.records = new Map();
     this.writeChains = new Map();
+    this.recordWriteChains = new Map();
   }
 
   async initialize() {
@@ -45,12 +47,17 @@ export class RunStore {
   }
 
   async update(runId, patch) {
-    const current = this.get(runId);
-    if (!current) throw new Error("Run not found");
-    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    this.records.set(runId, next);
-    await this.#writeRecord(next);
-    return next;
+    const previous = this.recordWriteChains.get(runId) ?? Promise.resolve();
+    const operation = previous.then(async () => {
+      const current = this.get(runId);
+      if (!current) throw new Error("Run not found");
+      const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+      this.records.set(runId, next);
+      await this.#writeRecord(next);
+      return next;
+    });
+    this.recordWriteChains.set(runId, operation.catch(() => {}));
+    return operation;
   }
 
   async appendEvent(runId, event) {
@@ -80,7 +87,7 @@ export class RunStore {
     const runDirectory = path.join(this.runsRoot, record.runId);
     await mkdir(runDirectory, { recursive: true, mode: 0o700 });
     const target = path.join(runDirectory, "run.json");
-    const temporary = path.join(runDirectory, `run-${process.pid}-${Date.now()}.tmp`);
+    const temporary = path.join(runDirectory, `run-${process.pid}-${randomUUID()}.tmp`);
     await writeFile(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, target);
   }

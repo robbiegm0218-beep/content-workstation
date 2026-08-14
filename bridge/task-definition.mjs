@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { validateArtifactManifest } from "./artifact-validator.mjs";
+import { normalizeGeneratedVideoPlanMaterials, validateVideoPlanSemantics } from "./video-plan-validator.mjs";
 
 export function createTaskSpecification(input, workspace, timeoutMs) {
   const taskPath = path.join(workspace, "input/task.json");
@@ -61,6 +62,33 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
     };
   }
 
+  if (input.taskType === "video-plan") {
+    const usesHtml = input.styleConfig?.sourceMode === "accepted-html";
+    const aspectRatio = input.styleConfig?.aspectRatio === "9:16" ? "9:16" : "16:9";
+    const dimensions = aspectRatio === "9:16" ? "1080×1920" : "1920×1080";
+    const durationInFrames = [9000, 14400].includes(input.styleConfig?.durationInFrames) ? input.styleConfig.durationInFrames : 900;
+    const durationLabel = durationInFrames === 14400 ? "8 分钟" : durationInFrames === 9000 ? "5 分钟" : "30 秒";
+    const sceneCountGuidance = durationInFrames === 14400 ? "建议 40～90 个场景" : durationInFrames === 9000 ? "建议 25～60 个场景" : "建议 4～12 个场景";
+    return {
+      prompt: [
+        "请使用 $content-workstation-creator Skill 执行 video-plan 场景方案任务。",
+        `已确认内容：${path.join(workspace, "input/confirmed-content.md")}`,
+        `视频配置：${path.join(workspace, "input/style-config.json")}`,
+        usesHtml ? `已验收 HTML 快照：${path.join(workspace, "input/accepted-presentation.html")}` : "本次直接根据内容稿规划，不读取 HTML。",
+        `任务补充要求：${taskPath}`,
+        `严格按口播顺序生成 ${durationLabel}、${aspectRatio}（${dimensions}）、共 ${durationInFrames} 帧的结构化场景方案；${sceneCountGuidance}，所有场景必须连续且时长总和必须精确等于 ${durationInFrames} 帧；不生成 React、HTML、图片或 MP4。`,
+        aspectRatio === "9:16" ? "这是独立竖屏编排：控制单屏文字量，优先纵向流程、上下对比与竖屏安全区，不得把横版布局直接裁切。" : "按横屏阅读顺序编排，保持标题、主体和字幕安全区。",
+        "每个场景都要填写画面文案、旁白、转场和字幕开关。本任务没有传入已登记素材，因此 materials 和所有 materialIds 必须为空；需要的真实素材只写入 missingMaterials，不得虚构文件路径、项目截图、人物、数据或案例。",
+        usesHtml ? "提取 HTML 的章节标题与顺序写入 sourceTrace.htmlSections，并从视频配置读取已接受 HTML 的 runId 与 SHA-256。" : "sourceTrace 的 HTML 字段保持空值。",
+        "最终只输出符合指定 JSON Schema 的 JSON。"
+      ].join("\n"),
+      sandbox: "read-only",
+      schemaPath: path.join(workspace, "schemas/video-scene-plan.schema.json"),
+      outputPath: path.join(workspace, "output/video-scene-plan.json"),
+      timeoutMs
+    };
+  }
+
   if (input.taskType === "publishing") {
     return {
       prompt: [
@@ -104,22 +132,29 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
 }
 
 export async function finalizeTaskResult(input, workspace, structuredResult) {
-  if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content") {
+  if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content" || input.taskType === "video-plan") {
     if (structuredResult.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
       throw new Error(`${input.taskType} result is missing repository Skill evidence`);
     }
     const isResearch = input.taskType === "research";
     const isAngles = input.taskType === "angles";
-    const artifactPath = path.join(workspace, isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : "output/content-result.json");
+    const isVideoPlan = input.taskType === "video-plan";
+    if (isVideoPlan) {
+      structuredResult = normalizeGeneratedVideoPlanMaterials(structuredResult);
+      validateVideoPlanSemantics(structuredResult, input.styleConfig);
+      await writeFile(path.join(workspace, "output/video-scene-plan.json"), `${JSON.stringify(structuredResult, null, 2)}\n`, { mode: 0o600 });
+    }
+    const relativePath = isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : isVideoPlan ? "output/video-scene-plan.json" : "output/content-result.json";
+    const artifactPath = path.join(workspace, relativePath);
     const buffer = await readFile(artifactPath);
     return {
       manifestVersion: "1.0",
       taskType: input.taskType,
       generationMode: "codex-structured",
       artifacts: [{
-        id: isResearch ? "topic-research-result" : isAngles ? "topic-angles-result" : "content-result",
-        type: isResearch ? "topic-research-json" : isAngles ? "topic-angles-json" : "content-json",
-        path: isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : "output/content-result.json",
+        id: isResearch ? "topic-research-result" : isAngles ? "topic-angles-result" : isVideoPlan ? "video-scene-plan" : "content-result",
+        type: isResearch ? "topic-research-json" : isAngles ? "topic-angles-json" : isVideoPlan ? "video-scene-plan-json" : "content-json",
+        path: relativePath,
         mimeType: "application/json",
         width: null,
         height: null,

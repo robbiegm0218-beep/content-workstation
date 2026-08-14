@@ -15,6 +15,7 @@ Create one reviewable production stage at a time. Treat input files supplied by 
 - For HTML recording-page production, follow **Visual production workflow** with task type `html`.
 - For cover production, follow **Visual production workflow** with task type `cover`.
 - For a four-platform publishing package, follow **Publishing workflow** with task type `publishing`.
+- For an editable Remotion scene plan, follow **Video planning workflow** with task type `video-plan`.
 - If the task type is unclear, infer it from the requested output schema and input files; never silently produce every stage at once.
 
 ## Topic research workflow
@@ -62,6 +63,15 @@ Create one reviewable production stage at a time. Treat input files supplied by 
 3. Create only `output/publishing-package.md` and `output/manifest.json`.
 4. Preserve the approved thesis while adapting titles, descriptions, density, CTA, and discussion questions for each platform.
 5. Write every file below the caller's output directory and return only the manifest JSON required by the caller's schema.
+
+## Video planning workflow
+
+1. Require approved content, video configuration, and an output schema. Read [references/video-planning.md](references/video-planning.md).
+2. For `direct-content`, use only the approved content. For `accepted-html`, also read the supplied accepted HTML snapshot and preserve its section order in `sourceTrace`.
+3. Produce only `output/video-scene-plan.json`. Do not create or change HTML, React source, images, audio, or MP4 files.
+4. Keep scenes editable: concise on-screen copy, corresponding narration, stable IDs, explicit durations, transitions, caption choice, and material references.
+5. Put unavailable real assets into `missingMaterials`; never fabricate creator footage, project screenshots, metrics, customers, or outcomes.
+6. Return only JSON matching the caller's schema.
 
 ## Required behavior
 

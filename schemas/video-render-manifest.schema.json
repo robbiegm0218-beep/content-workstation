@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "manifestVersion": {"type": "string", "const": "1.0"},
+    "taskType": {"type": "string", "const": "video-render"},
+    "generationMode": {"type": "string", "const": "remotion-local-render"},
+    "templateVersion": {"type": "string"},
+    "remotionVersion": {"type": "string"},
+    "width": {"type": "integer", "enum": [1920, 1080]},
+    "height": {"type": "integer", "enum": [1080, 1920]},
+    "fps": {"type": "integer", "const": 30},
+    "durationInFrames": {"type": "integer", "enum": [900, 9000, 14400]},
+    "durationSeconds": {"type": "number", "minimum": 29, "maximum": 481},
+    "artifacts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "enum": ["video-mp4", "video-poster"]},
+          "type": {"type": "string", "enum": ["video-mp4", "video-poster"]},
+          "path": {"type": "string", "enum": ["output/video.mp4", "output/video-poster.png"]},
+          "mimeType": {"type": "string", "enum": ["video/mp4", "image/png"]},
+          "width": {"type": "integer", "enum": [1920, 1080]},
+          "height": {"type": "integer", "enum": [1080, 1920]},
+          "size": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "required": ["id", "type", "path", "mimeType", "width", "height", "size", "sha256"]
+      }
+    },
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["manifestVersion", "taskType", "generationMode", "templateVersion", "remotionVersion", "width", "height", "fps", "durationInFrames", "durationSeconds", "artifacts", "notes"]
+}

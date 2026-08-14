@@ -9,6 +9,9 @@ import {
   createContentRun,
   createTopicAnglesRun,
   createTopicResearchRun,
+  createVideoPlanRun,
+  createVideoRenderRun,
+  deleteLocalAsset,
   createVisualRun,
   getArtifactBlob,
   getArtifactManifest,
@@ -17,13 +20,21 @@ import {
   getContentResult,
   getTopicAnglesResult,
   getTopicResearchResult,
+  getVideoScenePlan,
+  getVideoRenderManifest,
   getWorkstationState,
   listBridgeRuns,
+  listLocalAssets,
   retryBridgeRun,
+  resumeVideoRenderRun,
   runBridgeDoctor,
   saveWorkstationState,
+  uploadLocalAsset,
 } from "./lib/local-bridge";
-import type { ArtifactManifest, BridgeRun, BridgeRunStatus, DoctorReport, TopicResearchResult } from "./lib/local-bridge";
+import type { ArtifactManifest, BridgeRun, BridgeRunStatus, DoctorReport, LocalAsset, TopicResearchResult, VideoRenderManifest, VideoScene, VideoScenePlan } from "./lib/local-bridge";
+import { VideoPreview } from "./components/VideoPreview";
+import { invalidateCover, invalidateFromContent, invalidateFromCover, invalidateFromHtml, invalidateHtml, invalidatePublishing, invalidateVideoRender } from "./lib/content-invalidation.mjs";
+import { rebalanceEditedSceneDuration } from "./lib/video-plan-timeline.mjs";
 
 type View = "dashboard" | "create" | "library" | "cases" | "review" | "tasks" | "settings";
 type ContentStatus = "选题草稿" | "待生成" | "已生成" | "待录制" | "已录制" | "已发布" | "已复盘";
@@ -31,6 +42,12 @@ type Platform = "B站" | "小红书" | "视频号" | "抖音";
 type RecordingMode = "出镜口播" | "HTML录屏" | "混合录制" | "未设置";
 type DraftState = "未生成" | "编辑中" | "已确认";
 type AssetState = "未开始" | "待生成" | "已生成";
+type VideoPlanState = "未开始" | "待生成" | "生成中" | "待确认" | "已确认" | "失败";
+type VideoRenderState = "未开始" | "待渲染" | "渲染中" | "待验收" | "已生成" | "失败";
+type VideoSource = "direct-content" | "accepted-html";
+type VideoAspectRatio = "16:9" | "9:16";
+type VideoDurationFrames = 900 | 9000 | 14400;
+type VideoStyle = "知识卡片讲解" | "流程图演示" | "口播辅助画面" | "HTML视觉演化";
 type HtmlStyle = "专业科技" | "极简信息图" | "杂志卡片" | "白板讲解";
 type CoverStyle = "高对比科技" | "大字观点" | "杂志编辑" | "人物留白" | "高冲击人物科技";
 type ContentOrigin = "工作站创作" | "历史归档";
@@ -77,6 +94,27 @@ type ContentItem = {
   htmlState: AssetState;
   coverState: AssetState;
   publishingState: AssetState;
+  htmlEnabled: boolean;
+  videoEnabled: boolean;
+  videoSource: VideoSource;
+  videoAspectRatio: VideoAspectRatio;
+  videoDurationInFrames: VideoDurationFrames;
+  videoStyle: VideoStyle;
+  videoPlanState: VideoPlanState;
+  videoPlanError: string;
+  videoPlanRunId: string;
+  pendingVideoPlanRunId: string;
+  videoPlan: VideoScenePlan | null;
+  pendingVideoPlan: VideoScenePlan | null;
+  videoAssets: LocalAsset[];
+  videoAudioAssetId: string;
+  videoCaptionsAssetId: string;
+  videoRenderState: VideoRenderState;
+  videoRenderError: string;
+  videoRenderRunId: string;
+  pendingVideoRenderRunId: string;
+  videoRenderManifest: VideoRenderManifest | null;
+  pendingVideoRenderManifest: VideoRenderManifest | null;
   htmlStyle: HtmlStyle;
   coverStyle: CoverStyle;
   metrics: Metric[];
@@ -142,6 +180,8 @@ type ContentForm = {
   platforms: Platform[];
   outputs: string[];
   recordingMode: Exclude<RecordingMode, "未设置">;
+  htmlEnabled: boolean;
+  videoEnabled: boolean;
 };
 
 type TopicAngle = {
@@ -188,6 +228,12 @@ const coverStyles: Record<CoverStyle, { mark: string; description: string; guida
     guidance: "使用超短大标题、强明暗对比和一个高饱和强调色。仅在提供并明确授权创作者本人照片时使用人物抠图、轮廓光和自然手势；没有本人照片时不得生成随机人物，改用产品图标、界面局部或关键物件作为主体。装饰元素控制在 1～2 个，不模仿参考博主的脸、文案、品牌或固定版式。",
   },
 };
+const videoStyles: Record<VideoStyle, { mark: string; description: string }> = {
+  知识卡片讲解: { mark: "卡", description: "大字观点与卡片节奏，适合知识拆解。" },
+  流程图演示: { mark: "流", description: "突出步骤、节点和质量关卡。" },
+  口播辅助画面: { mark: "辅", description: "为真人口播补充重点字幕和示意画面。" },
+  HTML视觉演化: { mark: "演", description: "沿用已确认 HTML 的章节顺序和视觉线索。" },
+};
 const recordingModeCopy: Record<Exclude<RecordingMode, "未设置">, { icon: string; title: string; description: string; bestFor: string }> = {
   出镜口播: { icon: "人", title: "出镜口播", description: "以真人表达为主，穿插素材和字幕。", bestFor: "职业观点、个人经历、判断冲突" },
   HTML录屏: { icon: "屏", title: "HTML录屏", description: "生成静态页面，按页面顺序录屏讲解。", bestFor: "方法框架、流程、对比与案例拆解" },
@@ -214,9 +260,57 @@ function selectedPlatformNames(selectedPlatforms: Platform[]) {
   return selectedPlatforms.length ? selectedPlatforms.join("、") : "尚未选择平台";
 }
 
+function videoDurationLabel(frames: number) {
+  return frames === 14400 ? "8 分钟" : frames === 9000 ? "5 分钟" : "30 秒";
+}
+
+function exportableVideoRender(item: ContentItem) {
+  if (item.pendingVideoRenderManifest && item.pendingVideoRenderRunId && item.videoRenderState === "待验收") {
+    return { runId: item.pendingVideoRenderRunId, manifest: item.pendingVideoRenderManifest, pending: true };
+  }
+  if (item.videoRenderManifest && item.videoRenderRunId && item.videoRenderState === "已生成") {
+    return { runId: item.videoRenderRunId, manifest: item.videoRenderManifest, pending: false };
+  }
+  return null;
+}
+
+function recalculateSceneStarts(scenes: VideoScene[]) {
+  let startFrame = 0;
+  return scenes.map((scene) => {
+    const next = { ...scene, startFrame };
+    startFrame += scene.durationInFrames;
+    return next;
+  });
+}
+
+function rebalanceScenes(scenes: VideoScene[], totalFrames: number) {
+  const baseDuration = Math.floor(totalFrames / scenes.length);
+  return recalculateSceneStarts(scenes.map((scene, index) => ({
+    ...scene,
+    durationInFrames: index === scenes.length - 1 ? totalFrames - baseDuration * (scenes.length - 1) : baseDuration,
+  })));
+}
+
+function isConfirmableVideoPlan(plan: VideoScenePlan | null) {
+  if (!plan || ![900, 9000, 14400].includes(plan.durationInFrames) || plan.scenes.length < 2 || plan.scenes.length > 120) return false;
+  const ordered = recalculateSceneStarts(plan.scenes);
+  const maxSceneFrames = plan.durationInFrames === 900 ? 300 : 900;
+  return ordered.every((scene, index) => scene.startFrame === plan.scenes[index].startFrame && scene.durationInFrames >= 30 && scene.durationInFrames <= maxSceneFrames)
+    && plan.scenes.reduce((sum, scene) => sum + scene.durationInFrames, 0) === plan.durationInFrames;
+}
+
+async function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("读取文件失败"));
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.readAsDataURL(file);
+  });
+}
+
 function missingPublishingAssets(item: ContentItem) {
   const missing: string[] = [];
-  const needsHtml = item.recordingMode === "HTML录屏" || item.recordingMode === "混合录制";
+  const needsHtml = item.htmlEnabled;
   if (needsHtml && !(item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId)) missing.push("HTML");
   if (!(item.coverState === "已生成" && item.coverManifest && item.coverRunId)) missing.push("三尺寸封面");
   return missing;
@@ -228,7 +322,7 @@ function publishingDisabledReason(item: ContentItem) {
 }
 
 function productionStagesFor(item: ContentItem) {
-  const needsHtml = item.recordingMode === "HTML录屏" || item.recordingMode === "混合录制";
+  const needsHtml = item.htmlEnabled;
   const recorded = ["已录制", "已发布", "已复盘"].includes(item.status);
   const published = ["已发布", "已复盘"].includes(item.status);
   return [
@@ -236,6 +330,8 @@ function productionStagesFor(item: ContentItem) {
     { title: "内容草稿", description: "生成并回填可编辑的完整稿件", done: Boolean(item.script.trim()) },
     { title: "确认内容", description: "人工确认后才进入视觉制作", done: item.draftState === "已确认" },
     { title: needsHtml ? "HTML 录屏页" : "画面素材方案", description: needsHtml ? `当前风格：${item.htmlStyle}` : "出镜内容无需 HTML 页面", done: !needsHtml || Boolean(item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId) },
+    { title: item.videoEnabled ? "动态视频方案" : "动态视频（未选择）", description: item.videoEnabled ? `${item.videoStyle} · ${item.videoAspectRatio} · ${item.videoPlanState}` : "本期保留 HTML / 手工录制路线", done: !item.videoEnabled || item.videoPlanState === "已确认" },
+    { title: item.videoEnabled ? "动态视频成片" : "视频渲染（未选择）", description: item.videoEnabled ? `${videoDurationLabel(item.videoDurationInFrames)} ${item.videoAspectRatio} · ${item.videoRenderState}` : "不进入 Remotion 渲染链路", done: !item.videoEnabled || item.videoRenderState === "已生成" },
     { title: "三尺寸封面", description: `当前风格：${item.coverStyle}`, done: Boolean(item.coverState === "已生成" && item.coverManifest && item.coverRunId) },
     { title: publishingPackageLabel(item.platforms), description: `面向${selectedPlatformNames(item.platforms)}，验收后可下载 Markdown`, done: Boolean(item.publishingState === "已生成" && item.publishingManifest && item.publishingRunId) },
     { title: "录制与发布", description: published ? "内容已经发布" : recorded ? "已录制，等待发布" : "视觉资产完成后进入录制", done: published },
@@ -256,6 +352,27 @@ function normalizeDatabase(data: Database): Database {
       htmlState: item.htmlState || "未开始",
       coverState: item.coverState || "未开始",
       publishingState: item.publishingState || "未开始",
+      htmlEnabled: item.htmlEnabled ?? (item.recordingMode === "HTML录屏" || item.recordingMode === "混合录制"),
+      videoEnabled: item.videoEnabled ?? false,
+      videoSource: item.videoSource || "direct-content",
+      videoAspectRatio: item.videoAspectRatio || "16:9",
+      videoDurationInFrames: item.videoDurationInFrames || 900,
+      videoStyle: item.videoStyle || "知识卡片讲解",
+      videoPlanState: item.videoPlanState || "未开始",
+      videoPlanError: item.videoPlanError || "",
+      videoPlanRunId: item.videoPlanRunId || "",
+      pendingVideoPlanRunId: item.pendingVideoPlanRunId || "",
+      videoPlan: item.videoPlan || null,
+      pendingVideoPlan: item.pendingVideoPlan || null,
+      videoAssets: item.videoAssets || [],
+      videoAudioAssetId: item.videoAudioAssetId || "",
+      videoCaptionsAssetId: item.videoCaptionsAssetId || "",
+      videoRenderState: item.videoRenderState || "未开始",
+      videoRenderError: item.videoRenderError || "",
+      videoRenderRunId: item.videoRenderRunId || "",
+      pendingVideoRenderRunId: item.pendingVideoRenderRunId || "",
+      videoRenderManifest: item.videoRenderManifest || null,
+      pendingVideoRenderManifest: item.pendingVideoRenderManifest || null,
       htmlStyle: item.htmlStyle || "专业科技",
       coverStyle: item.coverStyle || "高对比科技",
       origin: item.origin || "工作站创作",
@@ -341,6 +458,8 @@ const initialForm: ContentForm = {
   platforms: [...platforms],
   outputs: [...outputsByMode.混合录制],
   recordingMode: "混合录制",
+  htmlEnabled: true,
+  videoEnabled: false,
 };
 
 const navItems: { id: View; label: string; icon: string; eyebrow: string }[] = [
@@ -521,10 +640,14 @@ export default function Home() {
     const existing = workingId ? db.contents.find((content) => content.id === workingId) : null;
     if (existing) {
       const briefChanged = existing.title !== form.title.trim() || existing.subtitle !== (form.subtitle.trim() || "副标题待完善") || existing.audience !== form.audience || existing.pain !== form.pain || existing.viewpoint !== form.viewpoint || existing.cases !== form.cases || existing.recordingMode !== form.recordingMode;
+      const platformsChanged = existing.platforms.join("|") !== form.platforms.join("|");
       setDb((current) => ({
         ...current,
-        contents: current.contents.map((item) => item.id === existing.id ? {
-          ...item,
+        contents: current.contents.map((item) => {
+          if (item.id !== existing.id) return item;
+          const base = briefChanged && item.draftState === "已确认" ? invalidateFromContent(item) : platformsChanged ? invalidatePublishing(item) : item;
+          return {
+          ...base,
           title: form.title.trim(),
           subtitle: form.subtitle.trim() || "副标题待完善",
           audience: form.audience,
@@ -535,12 +658,12 @@ export default function Home() {
           outputs: form.outputs,
           recordingMode: form.recordingMode,
           productionPlan: productionPlanFor(form.recordingMode),
+          htmlEnabled: form.htmlEnabled,
+          videoEnabled: form.videoEnabled,
           draftState: briefChanged && item.draftState === "已确认" ? "编辑中" : item.draftState,
-          htmlState: briefChanged && item.draftState === "已确认" ? "待生成" : item.htmlState,
-          coverState: briefChanged && item.draftState === "已确认" ? "待生成" : item.coverState,
-          publishingState: briefChanged && item.draftState === "已确认" ? "待生成" : item.publishingState,
           updatedAt: date,
-        } : item),
+        };
+        }),
       }));
       setSelectedId(existing.id);
       setNotice("当前选题已更新，可以继续在本页推进。 ");
@@ -566,6 +689,27 @@ export default function Home() {
       htmlState: "未开始",
       coverState: "未开始",
       publishingState: "未开始",
+      htmlEnabled: form.htmlEnabled,
+      videoEnabled: form.videoEnabled,
+      videoSource: "direct-content",
+      videoAspectRatio: "16:9",
+      videoDurationInFrames: 900,
+      videoStyle: "知识卡片讲解",
+      videoPlanState: "未开始",
+      videoPlanError: "",
+      videoPlanRunId: "",
+      pendingVideoPlanRunId: "",
+      videoPlan: null,
+      pendingVideoPlan: null,
+      videoAssets: [],
+      videoAudioAssetId: "",
+      videoCaptionsAssetId: "",
+      videoRenderState: "未开始",
+      videoRenderError: "",
+      videoRenderRunId: "",
+      pendingVideoRenderRunId: "",
+      videoRenderManifest: null,
+      pendingVideoRenderManifest: null,
       htmlStyle: "专业科技",
       coverStyle: "高对比科技",
       metrics: emptyMetrics(),
@@ -621,6 +765,8 @@ export default function Home() {
       platforms: [...item.platforms],
       outputs: [...item.outputs],
       recordingMode: item.recordingMode === "未设置" ? "混合录制" : item.recordingMode,
+      htmlEnabled: item.htmlEnabled,
+      videoEnabled: item.videoEnabled,
     });
     setWorkingId(item.id);
     setView("create");
@@ -685,6 +831,8 @@ export default function Home() {
         if (recoverable.taskType === "research") void pollTopicResearchRun(recoverable);
         else if (recoverable.taskType === "angles") void pollTopicAnglesRun(recoverable);
         else if (recoverable.taskType === "content") void pollContentRun(recoverable);
+        else if (recoverable.taskType === "video-plan") void pollVideoPlanRun(recoverable);
+        else if (recoverable.taskType === "video-render") void pollVideoRenderRun(recoverable);
         else void pollVisualRun(recoverable);
         return;
       }
@@ -692,6 +840,12 @@ export default function Home() {
       if (unapplied) void pollContentRun(unapplied);
       const unfinishedVisual = runs.find((run) => (run.taskType === "html" || run.taskType === "cover" || run.taskType === "publishing") && run.status === "completed" && db.contents.some((item) => item.id === run.contentId && (item.pendingHtmlRunId === run.runId || item.pendingCoverRunId === run.runId || item.pendingPublishingRunId === run.runId) && !(item.pendingHtmlManifest || item.pendingCoverManifest || item.pendingPublishingManifest)));
       if (unfinishedVisual) void pollVisualRun(unfinishedVisual);
+      const unfinishedVideoPlan = runs.find((run) => run.taskType === "video-plan" && run.status === "completed" && db.contents.some((item) => item.id === run.contentId && item.pendingVideoPlanRunId === run.runId && !item.pendingVideoPlan));
+      if (unfinishedVideoPlan) void pollVideoPlanRun(unfinishedVideoPlan);
+      const unfinishedVideoRender = runs.find((run) => run.taskType === "video-render" && run.status === "completed" && db.contents.some((item) => item.id === run.contentId && item.pendingVideoRenderRunId === run.runId && !item.pendingVideoRenderManifest));
+      if (unfinishedVideoRender) void pollVideoRenderRun(unfinishedVideoRender);
+      const resumableVideoRender = runs.find((run) => run.taskType === "video-render" && ["failed", "cancelled", "timeout", "interrupted"].includes(run.status) && db.contents.some((item) => item.id === run.contentId && item.pendingVideoRenderRunId === run.runId));
+      if (resumableVideoRender) setDb((database) => ({...database, contents: database.contents.map((item) => item.id === resumableVideoRender.contentId ? {...item, videoRenderState: "失败" as const, videoRenderError: resumableVideoRender.error?.message || "视频渲染中断，可从已完成分段继续。"} : item)}));
     } catch {
       setBridgeState("offline");
     }
@@ -786,8 +940,9 @@ export default function Home() {
               { ...generatedVersion, state: preserveConfirmed ? "候选" as const : "已采用" as const },
               ...item.contentVersions.map((version) => preserveConfirmed ? version : { ...version, state: "候选" as const }),
             ];
+            const base = preserveConfirmed ? item : invalidateFromContent(item);
             return {
-              ...item,
+              ...base,
               subtitle: preserveConfirmed ? item.subtitle : generatedVersion.subtitle || item.subtitle,
               pain: preserveConfirmed ? item.pain : generatedVersion.pain,
               viewpoint: preserveConfirmed ? item.viewpoint : generatedVersion.viewpoint,
@@ -965,8 +1120,9 @@ export default function Home() {
         const pendingRunId = taskType === "html" ? item.pendingHtmlRunId : taskType === "cover" ? item.pendingCoverRunId : item.pendingPublishingRunId;
         const pendingManifest = taskType === "html" ? item.pendingHtmlManifest : taskType === "cover" ? item.pendingCoverManifest : item.pendingPublishingManifest;
         if (!pendingRunId || !pendingManifest) return item;
+        const base = taskType === "html" ? invalidateFromHtml(item) : taskType === "cover" ? invalidateFromCover(item) : item;
         return {
-          ...item,
+          ...base,
           ...(taskType === "html" ? { htmlRunId: pendingRunId, htmlManifest: pendingManifest, htmlState: "已生成" as const, pendingHtmlRunId: "", pendingHtmlManifest: null } : taskType === "cover" ? { coverRunId: pendingRunId, coverManifest: pendingManifest, coverState: "已生成" as const, pendingCoverRunId: "", pendingCoverManifest: null } : { publishingRunId: pendingRunId, publishingManifest: pendingManifest, publishingState: "已生成" as const, pendingPublishingRunId: "", pendingPublishingManifest: null, status: (["已录制", "已发布", "已复盘"] as ContentStatus[]).includes(item.status) ? item.status : "待录制" as const }),
           updatedAt: today(),
         };
@@ -976,13 +1132,302 @@ export default function Home() {
     setNotice(taskType === "html" ? "HTML 录屏页已接受。" : taskType === "cover" ? "三尺寸封面已接受。 " : `${publishingPackageLabel(acceptedItem?.platforms || [])}已接受，可下载使用。`);
   }
 
+  async function startVideoPlanGeneration(item: ContentItem) {
+    if (!item.videoEnabled) {
+      setNotice("请先开启动态视频，再生成场景方案。");
+      return;
+    }
+    if (item.draftState !== "已确认" || !item.script.trim()) {
+      setNotice("请先确认内容稿，再生成视频场景方案。");
+      return;
+    }
+    if (activeRun) {
+      setNotice("当前已有 Codex 任务运行，请等待完成或先停止。");
+      return;
+    }
+    if (item.videoSource === "accepted-html" && !(item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId)) {
+      setNotice("基于 HTML 生成需要先接受当前 HTML 录屏页。");
+      return;
+    }
+    try {
+      let acceptedHtml: string | undefined;
+      const htmlArtifact = item.htmlManifest?.artifacts.find((artifact) => artifact.type === "recording-html");
+      if (item.videoSource === "accepted-html" && htmlArtifact) {
+        acceptedHtml = await (await getArtifactBlob(item.htmlRunId, htmlArtifact.id)).text();
+      }
+      await connectLocalBridge();
+      setBridgeState("connected");
+      const { run } = await createVideoPlanRun({
+        contentId: item.id,
+        contentVersion: Math.max(1, item.contentVersion),
+        confirmedContent: `# ${item.title}\n\n${item.subtitle}\n\n${item.script}`,
+        acceptedHtml,
+        styleConfig: {
+          sourceMode: item.videoSource,
+          style: item.videoStyle,
+          aspectRatio: item.videoAspectRatio,
+          width: item.videoAspectRatio === "9:16" ? 1080 : 1920,
+          height: item.videoAspectRatio === "9:16" ? 1920 : 1080,
+          durationInFrames: item.videoDurationInFrames,
+          htmlRunId: item.videoSource === "accepted-html" ? item.htmlRunId : "",
+          htmlSha256: item.videoSource === "accepted-html" ? htmlArtifact?.sha256 || "" : "",
+          creatorVoice: db.settings.style,
+        },
+      });
+      setDb((database) => ({
+        ...database,
+        contents: database.contents.map((content) => content.id === item.id ? {
+          ...content,
+          pendingVideoPlanRunId: run.runId,
+          pendingVideoPlan: null,
+          videoPlanState: "生成中" as const,
+          videoPlanError: "",
+          updatedAt: today(),
+        } : content),
+      }));
+      setNotice("Codex 已开始拆分视频场景，完成后可以逐场编辑。");
+      await pollVideoPlanRun(run);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "视频场景方案启动失败。");
+    }
+  }
+
+  async function pollVideoPlanRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const plan = await getVideoScenePlan(run.runId);
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => item.id === run.contentId ? {
+            ...item,
+            pendingVideoPlanRunId: run.runId,
+            pendingVideoPlan: plan,
+            videoPlanState: "待确认" as const,
+            videoPlanError: "",
+            updatedAt: today(),
+          } : item),
+        }));
+        setNotice("视频场景方案已生成，请逐场检查、编辑并确认。");
+      } else {
+        setDb((database) => ({
+          ...database,
+          contents: database.contents.map((item) => item.id === run.contentId ? { ...item, videoPlanState: "失败" as const, videoPlanError: run.status === "cancelled" ? "视频场景生成已停止。" : run.error?.message || "视频场景生成失败，请重试。" } : item),
+        }));
+        setNotice(run.status === "cancelled" ? "视频场景生成已停止。" : run.error?.message || "视频场景生成失败，请重试。");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取视频场景方案失败。");
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setActiveRun((currentRun) => currentRun?.runId === initialRun.runId ? null : currentRun);
+    }
+  }
+
+  function updateVideoProduction(contentId: string, patch: Partial<Pick<ContentItem, "videoEnabled" | "videoSource" | "videoAspectRatio" | "videoDurationInFrames" | "videoStyle" | "pendingVideoPlan">>) {
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => {
+        if (item.id !== contentId) return item;
+        const configurationChanged = patch.videoSource !== undefined || patch.videoAspectRatio !== undefined || patch.videoDurationInFrames !== undefined || patch.videoStyle !== undefined;
+        const updated = {
+          ...item,
+          ...patch,
+          videoPlanState: configurationChanged ? "待生成" as const : patch.pendingVideoPlan !== undefined ? "待确认" as const : item.videoPlanState,
+          videoPlanError: configurationChanged ? "" : item.videoPlanError,
+          pendingVideoPlanRunId: configurationChanged ? "" : item.pendingVideoPlanRunId,
+          pendingVideoPlan: configurationChanged ? null : (patch.pendingVideoPlan ?? item.pendingVideoPlan),
+          videoRenderState: configurationChanged ? "待渲染" as const : item.videoRenderState,
+          videoRenderError: configurationChanged ? "" : item.videoRenderError,
+          videoRenderRunId: configurationChanged ? "" : item.videoRenderRunId,
+          videoRenderManifest: configurationChanged ? null : item.videoRenderManifest,
+          pendingVideoRenderRunId: configurationChanged ? "" : item.pendingVideoRenderRunId,
+          pendingVideoRenderManifest: configurationChanged ? null : item.pendingVideoRenderManifest,
+          updatedAt: today(),
+        };
+        return patch.pendingVideoPlan !== undefined ? invalidateVideoRender(updated) : updated;
+      }),
+    }));
+  }
+
+  function updateProductionChoice(contentId: string, choice: "html" | "video", enabled: boolean) {
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => {
+        if (item.id !== contentId) return item;
+        const updated = {
+          ...item,
+          ...(choice === "html" ? { htmlEnabled: enabled } : { videoEnabled: enabled, videoPlanState: enabled && item.videoPlanState === "未开始" ? "待生成" as const : item.videoPlanState }),
+        };
+        return { ...(choice === "html" ? invalidatePublishing(updated) : updated), updatedAt: today() };
+      }),
+    }));
+  }
+
+  function acceptVideoPlan(contentId: string) {
+    setDb((database) => ({
+      ...database,
+      contents: database.contents.map((item) => {
+        if (item.id !== contentId || !isConfirmableVideoPlan(item.pendingVideoPlan)) return item;
+        return {
+          ...item,
+          videoPlanRunId: item.pendingVideoPlanRunId,
+          videoPlan: item.pendingVideoPlan,
+          pendingVideoPlanRunId: "",
+          pendingVideoPlan: null,
+          videoPlanState: "已确认" as const,
+          videoPlanError: "",
+          videoRenderState: "待渲染" as const,
+          videoRenderError: "",
+          videoRenderRunId: "",
+          videoRenderManifest: null,
+          pendingVideoRenderRunId: "",
+          pendingVideoRenderManifest: null,
+          updatedAt: today(),
+        };
+      }),
+    }));
+    setNotice("视频场景方案已确认。现在可以登记素材、实时预览并渲染 MP4。");
+  }
+
+  async function refreshVideoAssets(item: ContentItem) {
+    try {
+      const { assets } = await listLocalAssets(item.id);
+      setDb((database) => ({ ...database, contents: database.contents.map((content) => content.id === item.id ? { ...content, videoAssets: assets } : content) }));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取本地素材失败。");
+    }
+  }
+
+  async function uploadVideoAsset(item: ContentItem, file: File) {
+    if (file.size > 150 * 1024 * 1024) { setNotice("单个素材不能超过 150MB。"); return; }
+    try {
+      const mimeType = file.type || (file.name.toLowerCase().endsWith(".srt") ? "application/x-subrip" : "");
+      const { asset } = await uploadLocalAsset({ contentId: item.id, name: file.name, mimeType, dataBase64: await fileToBase64(file) });
+      setDb((database) => ({ ...database, contents: database.contents.map((content) => content.id === item.id ? { ...content, videoAssets: [asset, ...content.videoAssets.filter((entry) => entry.assetId !== asset.assetId)], updatedAt: today() } : content) }));
+      setNotice(`素材“${asset.name}”已安全保存到本机。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "素材上传失败。");
+    }
+  }
+
+  async function removeVideoAsset(item: ContentItem, assetId: string) {
+    try {
+      await deleteLocalAsset(item.id, assetId);
+      setDb((database) => ({ ...database, contents: database.contents.map((content) => {
+        if (content.id !== item.id) return content;
+        const asset = content.videoAssets.find((entry) => entry.assetId === assetId);
+        const removePath = asset?.relativePath || "";
+        const cleanPlan = (plan: VideoScenePlan | null) => plan ? { ...plan, materials: plan.materials.filter((value) => value !== removePath), scenes: plan.scenes.map((scene) => ({ ...scene, materialIds: scene.materialIds.filter((value) => value !== removePath) })) } : null;
+        return { ...invalidateVideoRender({ ...content, videoAssets: content.videoAssets.filter((entry) => entry.assetId !== assetId), videoAudioAssetId: content.videoAudioAssetId === assetId ? "" : content.videoAudioAssetId, videoCaptionsAssetId: content.videoCaptionsAssetId === assetId ? "" : content.videoCaptionsAssetId, videoPlan: cleanPlan(content.videoPlan), pendingVideoPlan: cleanPlan(content.pendingVideoPlan) }), updatedAt: today() };
+      }) }));
+      setNotice("本地素材已删除；相关视频绑定已同步清除。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除素材失败。");
+    }
+  }
+
+  function selectVideoInput(contentId: string, field: "videoAudioAssetId" | "videoCaptionsAssetId", assetId: string) {
+    setDb((database) => ({ ...database, contents: database.contents.map((item) => item.id === contentId ? { ...invalidateVideoRender({ ...item, [field]: assetId }), updatedAt: today() } : item) }));
+  }
+
+  function attachAssetToVideoScene(contentId: string, asset: LocalAsset) {
+    setDb((database) => ({ ...database, contents: database.contents.map((item) => {
+      if (item.id !== contentId || !item.videoPlan) return item;
+      const plan = structuredClone(item.videoPlan);
+      const target = plan.scenes.find((scene) => scene.type === "screenshot") || plan.scenes[0];
+      plan.materials = Array.from(new Set([...plan.materials, asset.relativePath]));
+      target.materialIds = [asset.relativePath, ...target.materialIds.filter((value) => value !== asset.relativePath)].slice(0, 6);
+      return { ...invalidateVideoRender({ ...item, pendingVideoPlan: plan, pendingVideoPlanRunId: item.videoPlanRunId, videoPlanState: "待确认" as const }), updatedAt: today() };
+    }) }));
+    setNotice("素材已绑定到画面场景，请检查预览后重新确认方案。");
+  }
+
+  async function startVideoRender(item: ContentItem) {
+    const scenePlan = item.pendingVideoPlan || item.videoPlan;
+    if (!isConfirmableVideoPlan(scenePlan)) { setNotice("当前场景方案还不完整，请先检查总时长和场景时长。"); return; }
+    if (activeRun) { setNotice("当前已有任务运行，请等待完成或先停止。"); return; }
+    try {
+      const assetIds = Array.from(new Set([...item.videoAssets.filter((asset) => scenePlan.materials.includes(asset.relativePath)).map((asset) => asset.assetId), item.videoAudioAssetId, item.videoCaptionsAssetId].filter(Boolean)));
+      const { run } = await createVideoRenderRun({ contentId: item.id, contentVersion: Math.max(1, item.contentVersion), scenePlan, assetIds, audioAssetId: item.videoAudioAssetId, captionsAssetId: item.videoCaptionsAssetId });
+      setDb((database) => ({ ...database, contents: database.contents.map((content) => content.id === item.id ? { ...content, videoPlan: scenePlan, videoPlanRunId: content.pendingVideoPlanRunId || content.videoPlanRunId, pendingVideoPlan: null, pendingVideoPlanRunId: "", videoPlanState: "已确认" as const, pendingVideoRenderRunId: run.runId, pendingVideoRenderManifest: null, videoRenderState: "渲染中" as const, videoRenderError: "", updatedAt: today() } : content) }));
+      setNotice("Remotion 已开始在本机渲染，页面会持续显示真实进度。");
+      await pollVideoRenderRun(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "视频渲染启动失败。";
+      setDb((database) => ({ ...database, contents: database.contents.map((content) => content.id === item.id ? { ...content, videoRenderState: "失败" as const, videoRenderError: message } : content) }));
+      setNotice(message);
+    }
+  }
+
+  async function pollVideoRenderRun(initialRun: BridgeRun) {
+    if (pollingRuns.current.has(initialRun.runId)) return;
+    pollingRuns.current.add(initialRun.runId);
+    let run = initialRun;
+    setActiveRun(run);
+    try {
+      while (run.status === "queued" || run.status === "running") {
+        setActiveRun(run);
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        ({ run } = await getBridgeRun(run.runId));
+      }
+      setActiveRun(run);
+      if (run.status === "completed") {
+        const manifest = await getVideoRenderManifest(run.runId);
+        setDb((database) => ({ ...database, contents: database.contents.map((item) => item.id === run.contentId ? { ...item, pendingVideoRenderRunId: run.runId, pendingVideoRenderManifest: manifest, videoRenderState: "待验收" as const, videoRenderError: "", updatedAt: today() } : item) }));
+        setNotice("MP4 和 poster 已渲染并通过自动校验，请播放检查后验收。");
+      } else {
+        setDb((database) => ({ ...database, contents: database.contents.map((item) => item.id === run.contentId ? { ...item, videoRenderState: "失败" as const, videoRenderError: run.error?.message || "视频渲染失败。" } : item) }));
+        setNotice(run.status === "cancelled" ? "视频渲染已停止。" : run.error?.message || "视频渲染失败。");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "读取视频渲染结果失败。";
+      setDb((database) => ({ ...database, contents: database.contents.map((item) => item.id === initialRun.contentId ? { ...item, videoRenderState: "失败" as const, videoRenderError: message } : item) }));
+      setNotice(message);
+    } finally {
+      pollingRuns.current.delete(initialRun.runId);
+      setActiveRun((current) => current?.runId === initialRun.runId ? null : current);
+    }
+  }
+
+  async function resumeVideoRender(item: ContentItem) {
+    if (!item.pendingVideoRenderRunId) { setNotice("没有可恢复的本地视频分段，请重新开始渲染。"); return; }
+    if (activeRun) { setNotice("当前已有任务运行，请等待完成或先停止。"); return; }
+    try {
+      await connectLocalBridge();
+      setBridgeState("connected");
+      const {run} = await resumeVideoRenderRun(item.pendingVideoRenderRunId);
+      setDb((database) => ({...database, contents: database.contents.map((content) => content.id === item.id ? {...content, videoRenderState: "渲染中" as const, videoRenderError: "", updatedAt: today()} : content)}));
+      setNotice("已从本地检查点继续渲染，完成的分段不会重复制作。");
+      await pollVideoRenderRun(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "继续视频渲染失败。";
+      setDb((database) => ({...database, contents: database.contents.map((content) => content.id === item.id ? {...content, videoRenderState: "失败" as const, videoRenderError: message} : content)}));
+      setNotice(message);
+    }
+  }
+
+  function acceptVideoRender(contentId: string) {
+    setDb((database) => ({ ...database, contents: database.contents.map((item) => item.id === contentId && item.pendingVideoRenderManifest ? { ...item, videoRenderRunId: item.pendingVideoRenderRunId, videoRenderManifest: item.pendingVideoRenderManifest, pendingVideoRenderRunId: "", pendingVideoRenderManifest: null, videoRenderState: "已生成" as const, videoRenderError: "", updatedAt: today() } : item) }));
+    setNotice("动态视频已验收，可播放或下载 MP4 与 poster。");
+  }
+
   async function stopActiveRun() {
     if (!activeRun) return;
     try {
       const { run } = await cancelBridgeRun(activeRun.runId);
       setActiveRun(run);
       setBridgeRuns((current) => [run, ...current.filter((item) => item.runId !== run.runId)]);
-      setNotice("正在停止 Codex 任务……");
+      setNotice(activeRun.taskType === "video-render" ? "正在停止本机视频渲染……" : "正在停止 Codex 任务……");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "停止任务失败。 ");
     }
@@ -1000,6 +1445,8 @@ export default function Home() {
       if (run.taskType === "research") await pollTopicResearchRun(run);
       else if (run.taskType === "angles") await pollTopicAnglesRun(run);
       else if (run.taskType === "content") await pollContentRun(run);
+      else if (run.taskType === "video-plan") await pollVideoPlanRun(run);
+      else if (run.taskType === "video-render") await pollVideoRenderRun(run);
       else await pollVisualRun(run);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重新执行任务失败。");
@@ -1028,8 +1475,9 @@ export default function Home() {
         if (item.id !== contentId) return item;
         const version = item.contentVersions.find((candidate) => candidate.runId === runId);
         if (!version) return item;
+        const base = invalidateFromContent(item);
         return {
-          ...item,
+          ...base,
           subtitle: version.subtitle || item.subtitle,
           pain: version.pain,
           viewpoint: version.viewpoint,
@@ -1037,9 +1485,6 @@ export default function Home() {
           draftState: "编辑中",
           acceptedRunId: runId,
           contentVersions: item.contentVersions.map((candidate) => ({ ...candidate, state: candidate.runId === runId ? "已采用" : "候选" })),
-          htmlState: item.htmlState === "已生成" ? "待生成" : item.htmlState,
-          coverState: item.coverState === "已生成" ? "待生成" : item.coverState,
-          publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
           updatedAt: today(),
         };
       }),
@@ -1255,11 +1700,10 @@ export default function Home() {
     setDb((current) => ({
       ...current,
       contents: current.contents.map((item) => item.id === id ? {
-        ...item,
+        ...invalidatePublishing(item),
         recordingMode: mode,
         productionPlan: productionPlanFor(mode),
         outputs: Array.from(new Set([...item.outputs, ...outputsByMode[mode]])),
-        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
         updatedAt: today(),
       } : item),
     }));
@@ -1270,12 +1714,9 @@ export default function Home() {
     setDb((current) => ({
       ...current,
       contents: current.contents.map((item) => item.id === id ? {
-        ...item,
+        ...(item.draftState === "已确认" ? invalidateFromContent(item) : item),
         script,
         draftState: item.draftState === "已确认" ? "编辑中" : script.trim() ? "编辑中" : "未生成",
-        htmlState: item.draftState === "已确认" ? "待生成" : item.htmlState,
-        coverState: item.draftState === "已确认" ? "待生成" : item.coverState,
-        publishingState: item.draftState === "已确认" ? "待生成" : item.publishingState,
         updatedAt: today(),
       } : item),
     }));
@@ -1296,6 +1737,7 @@ export default function Home() {
         htmlState: content.htmlState === "未开始" ? "待生成" : content.htmlState,
         coverState: content.coverState === "未开始" ? "待生成" : content.coverState,
         publishingState: content.publishingState === "未开始" ? "待生成" : content.publishingState,
+        videoPlanState: content.videoEnabled && content.videoPlanState === "未开始" ? "待生成" : content.videoPlanState,
         updatedAt: today(),
       } : content),
     }));
@@ -1305,15 +1747,10 @@ export default function Home() {
   function updateHtmlStyle(id: string, style: HtmlStyle) {
     setDb((current) => ({ ...current, contents: current.contents.map((item) => {
       if (item.id !== id || item.htmlStyle === style) return item;
+      const base = invalidateFromHtml(invalidateHtml(item));
       return {
-        ...item,
+        ...base,
         htmlStyle: style,
-        htmlState: item.htmlState === "已生成" ? "待生成" : item.htmlState,
-        htmlRunId: "",
-        htmlManifest: null,
-        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
-        publishingRunId: "",
-        publishingManifest: null,
         updatedAt: today(),
       };
     }) }));
@@ -1322,15 +1759,10 @@ export default function Home() {
   function updateCoverStyle(id: string, style: CoverStyle) {
     setDb((current) => ({ ...current, contents: current.contents.map((item) => {
       if (item.id !== id || item.coverStyle === style) return item;
+      const base = invalidateFromCover(invalidateCover(item));
       return {
-        ...item,
+        ...base,
         coverStyle: style,
-        coverState: item.coverState === "已生成" ? "待生成" : item.coverState,
-        coverRunId: "",
-        coverManifest: null,
-        publishingState: item.publishingState === "已生成" ? "待生成" : item.publishingState,
-        publishingRunId: "",
-        publishingManifest: null,
         updatedAt: today(),
       };
     }) }));
@@ -1350,7 +1782,11 @@ export default function Home() {
   function updateContentMetadata(id: string, patch: Partial<Pick<ContentItem, "title" | "subtitle" | "publishedAt" | "publishLinks" | "archiveNotes" | "viewpoint">>) {
     setDb((current) => ({
       ...current,
-      contents: current.contents.map((item) => item.id === id ? { ...item, ...patch, updatedAt: today() } : item),
+      contents: current.contents.map((item) => {
+        if (item.id !== id) return item;
+        const changesContent = patch.title !== undefined || patch.subtitle !== undefined || patch.viewpoint !== undefined;
+        return { ...(changesContent ? invalidateFromContent(item) : item), ...patch, ...(changesContent ? { draftState: "编辑中" as const } : {}), updatedAt: today() };
+      }),
     }));
   }
 
@@ -1398,6 +1834,27 @@ export default function Home() {
       htmlState: "未开始",
       coverState: "未开始",
       publishingState: "未开始",
+      htmlEnabled: false,
+      videoEnabled: false,
+      videoSource: "direct-content",
+      videoAspectRatio: "16:9",
+      videoDurationInFrames: 900,
+      videoStyle: "知识卡片讲解",
+      videoPlanState: "未开始",
+      videoPlanError: "",
+      videoPlanRunId: "",
+      pendingVideoPlanRunId: "",
+      videoPlan: null,
+      pendingVideoPlan: null,
+      videoAssets: [],
+      videoAudioAssetId: "",
+      videoCaptionsAssetId: "",
+      videoRenderState: "未开始",
+      videoRenderError: "",
+      videoRenderRunId: "",
+      pendingVideoRenderRunId: "",
+      videoRenderManifest: null,
+      pendingVideoRenderManifest: null,
       htmlStyle: "专业科技",
       coverStyle: "高对比科技",
       metrics: historyForm.metrics,
@@ -1694,14 +2151,15 @@ export default function Home() {
                     const copy = recordingModeCopy[mode];
                     return <label className={`recording-card ${form.recordingMode === mode ? "selected" : ""}`} key={mode}><input type="radio" name="recording-mode" checked={form.recordingMode === mode} onChange={() => changeRecordingMode(mode)} /><span className="recording-icon">{copy.icon}</span><span className="recording-copy"><strong>{copy.title}{mode === "混合录制" && <i>推荐</i>}</strong><small>{copy.description}</small><em>适合：{copy.bestFor}</em></span></label>;
                   })}</div><div className="recording-plan-preview"><span>当前制作结构</span><p>{productionPlanFor(form.recordingMode)}</p></div></fieldset>
+                  <fieldset className="full"><legend>本期视觉产物（可独立选择）</legend><div className="production-output-choice"><label className={form.htmlEnabled ? "selected" : ""}><input type="checkbox" checked={form.htmlEnabled} onChange={(event) => updateForm("htmlEnabled", event.target.checked)} /><span><strong>生成 HTML 录屏页</strong><small>保留现有静态页面录屏能力</small></span></label><label className={form.videoEnabled ? "selected" : ""}><input type="checkbox" checked={form.videoEnabled} onChange={(event) => updateForm("videoEnabled", event.target.checked)} /><span><strong>生成动态视频场景方案</strong><small>先编辑确认，后续再渲染 MP4</small></span></label></div></fieldset>
                   <label>视频时长<select value={form.duration} onChange={(e) => updateForm("duration", e.target.value)}><option>60–90 秒</option><option>3–5 分钟</option><option>5–8 分钟</option><option>8–12 分钟</option></select></label>
                   <fieldset><legend>发布平台</legend><div className="check-grid">{platforms.map((item) => <label className="check-card" key={item}><input type="checkbox" checked={form.platforms.includes(item)} onChange={() => toggleFormArray("platforms", item)} /><span>{item}</span></label>)}</div></fieldset>
                 </div>
                 <ol className="stage-flow">
                   <li className="active"><span>1</span><p><strong>生成内容草稿</strong><small>标题、口播、时间轴和发布文案</small></p></li>
                   <li><span>2</span><p><strong>查看、编辑、确认</strong><small>确认之前不生成视觉资产</small></p></li>
-                  <li><span>3</span><p><strong>选择两类风格</strong><small>HTML 与封面可以选择不同风格</small></p></li>
-                  <li><span>4</span><p><strong>分别生成</strong><small>HTML 和三尺寸封面互不绑定</small></p></li>
+                  <li><span>3</span><p><strong>选择制作路线</strong><small>HTML、视频和封面互相独立</small></p></li>
+                  <li><span>4</span><p><strong>逐项生成与确认</strong><small>场景方案确认后才进入渲染</small></p></li>
                 </ol>
               </div>
 
@@ -1719,6 +2177,22 @@ export default function Home() {
                 onGenerateVisual={(kind) => void startVisualGeneration(workingContent, kind)}
                 onAcceptVisual={(kind) => acceptVisualAsset(workingContent.id, kind)}
                 onContinueVisual={(kind, instruction) => void continueProductionRun(workingContent, kind, instruction)}
+                onVideoSource={(source) => updateVideoProduction(workingContent.id, { videoSource: source, videoStyle: source === "accepted-html" ? "HTML视觉演化" : workingContent.videoStyle })}
+                onVideoAspect={(videoAspectRatio) => updateVideoProduction(workingContent.id, { videoAspectRatio })}
+                onVideoDuration={(videoDurationInFrames) => updateVideoProduction(workingContent.id, { videoDurationInFrames })}
+                onVideoStyle={(style) => updateVideoProduction(workingContent.id, { videoStyle: style })}
+                onGenerateVideo={() => void startVideoPlanGeneration(workingContent)}
+                onVideoPlan={(plan) => updateVideoProduction(workingContent.id, { pendingVideoPlan: plan })}
+                onAcceptVideo={() => acceptVideoPlan(workingContent.id)}
+                onRefreshAssets={() => void refreshVideoAssets(workingContent)}
+                onUploadAsset={(file) => void uploadVideoAsset(workingContent, file)}
+                onDeleteAsset={(assetId) => void removeVideoAsset(workingContent, assetId)}
+                onAttachAsset={(asset) => attachAssetToVideoScene(workingContent.id, asset)}
+                onAudio={(assetId) => selectVideoInput(workingContent.id, "videoAudioAssetId", assetId)}
+                onCaptions={(assetId) => selectVideoInput(workingContent.id, "videoCaptionsAssetId", assetId)}
+                onRenderVideo={() => void startVideoRender(workingContent)}
+                onResumeVideo={() => void resumeVideoRender(workingContent)}
+                onAcceptRender={() => acceptVideoRender(workingContent.id)}
               />}
             </div>
 
@@ -1771,6 +2245,24 @@ export default function Home() {
                 onGenerateVisual={(kind) => void startVisualGeneration(selected, kind)}
                 onAcceptVisual={(kind) => acceptVisualAsset(selected.id, kind)}
                 onContinueVisual={(kind, instruction) => void continueProductionRun(selected, kind, instruction)}
+                onHtmlEnabled={(enabled) => updateProductionChoice(selected.id, "html", enabled)}
+                onVideoEnabled={(enabled) => updateProductionChoice(selected.id, "video", enabled)}
+                onVideoSource={(source) => updateVideoProduction(selected.id, { videoSource: source, videoStyle: source === "accepted-html" ? "HTML视觉演化" : selected.videoStyle })}
+                onVideoAspect={(videoAspectRatio) => updateVideoProduction(selected.id, { videoAspectRatio })}
+                onVideoDuration={(videoDurationInFrames) => updateVideoProduction(selected.id, { videoDurationInFrames })}
+                onVideoStyle={(style) => updateVideoProduction(selected.id, { videoStyle: style })}
+                onGenerateVideo={() => void startVideoPlanGeneration(selected)}
+                onVideoPlan={(plan) => updateVideoProduction(selected.id, { pendingVideoPlan: plan })}
+                onAcceptVideo={() => acceptVideoPlan(selected.id)}
+                onRefreshAssets={() => void refreshVideoAssets(selected)}
+                onUploadAsset={(file) => void uploadVideoAsset(selected, file)}
+                onDeleteAsset={(assetId) => void removeVideoAsset(selected, assetId)}
+                onAttachAsset={(asset) => attachAssetToVideoScene(selected.id, asset)}
+                onAudio={(assetId) => selectVideoInput(selected.id, "videoAudioAssetId", assetId)}
+                onCaptions={(assetId) => selectVideoInput(selected.id, "videoCaptionsAssetId", assetId)}
+                onRenderVideo={() => void startVideoRender(selected)}
+                onResumeVideo={() => void resumeVideoRender(selected)}
+                onAcceptRender={() => acceptVideoRender(selected.id)}
                 onMetric={(platform, field, value) => updateMetric(selected.id, platform, field, value)}
                 onMetadata={(patch) => updateContentMetadata(selected.id, patch)}
                 onDelete={() => deleteContent(selected.id)}
@@ -1897,6 +2389,8 @@ const taskTypeCopy: Record<BridgeRun["taskType"], string> = {
   html: "HTML 录屏页",
   cover: "三尺寸封面",
   publishing: "平台发布包",
+  "video-plan": "动态视频场景方案",
+  "video-render": "Remotion 本地渲染",
 };
 
 const runStatusCopy: Record<BridgeRunStatus, string> = {
@@ -1916,7 +2410,10 @@ const doctorCheckCopy: Record<string, string> = {
   skill: "工作站 Skill",
   workspace: "任务工作区",
   "image-generation": "图片生成能力",
-  renderer: "本地渲染能力",
+  renderer: "封面本地渲染",
+  remotion: "Remotion 视频引擎",
+  "remotion-browser": "视频渲染浏览器",
+  "video-tools": "FFmpeg 媒体工具",
   "web-port": "网页端口",
   "bridge-port": "Bridge 服务",
 };
@@ -1939,7 +2436,7 @@ function SetupGuidePanel({ configured, bridgeState, onOpen }: {
   return <section className="panel setup-guide-panel">
     <div className="connection-head"><div><span className="eyebrow">GETTING STARTED</span><h2>首次使用向导</h2></div><strong className={`connection-summary ${ready ? "summary-pass" : "summary-warn"}`}>{ready ? "设置完成" : "还有步骤"}</strong></div>
     <p>其他电脑首次运行时，按顺序完成本地启动、Codex 登录和账号资料设置。</p>
-    <div className="setup-mini-steps"><span className={bridgeState === "connected" ? "done" : ""}>1 本地服务</span><span className={bridgeState === "connected" ? "done" : ""}>2 Codex 连接</span><span className={configured ? "done" : ""}>3 账号资料</span></div>
+    <div className="setup-mini-steps"><span className={bridgeState === "connected" ? "done" : ""}>1 本地服务</span><span className={bridgeState === "connected" ? "done" : ""}>2 Codex 连接</span><span>3 视频环境</span><span className={configured ? "done" : ""}>4 账号资料</span></div>
     <button className="secondary-button" onClick={onOpen}>{ready ? "重新查看使用向导" : "继续完成设置"}</button>
   </section>;
 }
@@ -1956,12 +2453,14 @@ function FirstRunSetupModal({ settings, onChange, bridgeState, report, loading, 
   onClose: () => void;
 }) {
   const codexReady = bridgeState === "connected" && report?.checks.every((check) => check.status !== "fail");
+  const videoReady = ["remotion", "remotion-browser", "video-tools"].every((id) => report?.checks.find((check) => check.id === id)?.status === "pass");
   const field = (key: keyof Pick<Settings, "name" | "role" | "experience" | "audience" | "style" | "goal">, value: string) => onChange({ ...settings, [key]: value });
-  return <div className="modal-backdrop" role="presentation"><section className="task-modal first-run-modal" role="dialog" aria-modal="true" aria-labelledby="first-run-title"><div className="modal-heading"><div><span className="eyebrow">LOCAL FIRST RUN</span><h2 id="first-run-title">三步完成本地连接</h2><p>资料和生成结果只保存在这台电脑，不需要填写模型 API Key。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭首次使用向导">×</button></div>
+  return <div className="modal-backdrop" role="presentation"><section className="task-modal first-run-modal" role="dialog" aria-modal="true" aria-labelledby="first-run-title"><div className="modal-heading"><div><span className="eyebrow">LOCAL FIRST RUN</span><h2 id="first-run-title">四步完成本地工作站设置</h2><p>资料和生成结果只保存在这台电脑，不需要填写模型 API Key。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭首次使用向导">×</button></div>
     <div className="first-run-steps">
       <section><span className="setup-step-number">01</span><div><h3>启动内容工作站</h3><p>首次下载仓库后安装依赖，以后只需运行一条启动命令。</p><div className="command-list"><button onClick={() => onCopy("npm install")}><code>npm install</code><small>首次运行</small></button><button onClick={() => onCopy("npm run dev:local")}><code>npm run dev:local</code><small>以后启动</small></button></div></div></section>
       <section><span className="setup-step-number">02</span><div><h3>连接本机 Codex</h3><p>工作站复用 Codex CLI 登录状态。未安装时先安装，然后通过浏览器完成 ChatGPT 登录。</p><div className="command-list three"><button onClick={() => onCopy("npm install --global @openai/codex")}><code>npm install --global @openai/codex</code><small>安装 Codex</small></button><button onClick={() => onCopy("codex login")}><code>codex login</code><small>登录</small></button><button onClick={() => onCopy("codex login status")}><code>codex login status</code><small>查看状态</small></button></div><div className="setup-check-row"><span className={`connection-summary ${codexReady ? "summary-pass" : bridgeState === "offline" ? "summary-fail" : "summary-warn"}`}>{codexReady ? "Codex 可以使用" : bridgeState === "offline" ? "本地服务未连接" : "等待完整检测"}</span><button className="secondary-button" onClick={onCheck} disabled={loading}>{loading ? "正在检测…" : "检测 Codex 连接"}</button></div></div></section>
-      <section><span className="setup-step-number">03</span><div><h3>填写你的账号资料</h3><p>这些信息会作为每次生成的稳定背景，不会提交到 Git 仓库。</p><div className="setup-profile-grid"><label>称呼<input value={settings.name} onChange={(event) => field("name", event.target.value)} /></label><label>当前身份<input value={settings.role} onChange={(event) => field("role", event.target.value)} /></label><label className="full">真实经历<textarea value={settings.experience} onChange={(event) => field("experience", event.target.value)} /></label><label className="full">目标受众<textarea value={settings.audience} onChange={(event) => field("audience", event.target.value)} /></label><label className="full">表达风格<textarea value={settings.style} onChange={(event) => field("style", event.target.value)} /></label><label className="full">内容与商业目标<textarea value={settings.goal} onChange={(event) => field("goal", event.target.value)} /></label></div></div></section>
+      <section><span className="setup-step-number">03</span><div><h3>准备动态视频环境（可选）</h3><p>只做内容稿、HTML 和封面可以跳过。需要渲染 MP4 时，准备 Remotion 专用浏览器并确认 FFmpeg 可用。</p><div className="command-list three"><button onClick={() => onCopy("npm run video:install")}><code>npm run video:install</code><small>安装视频依赖</small></button><button onClick={() => onCopy("npm run video:browser")}><code>npm run video:browser</code><small>准备渲染浏览器</small></button><button onClick={() => onCopy("npm run doctor")}><code>npm run doctor</code><small>检查完整环境</small></button></div><div className="setup-check-row"><span className={`connection-summary ${videoReady ? "summary-pass" : "summary-warn"}`}>{videoReady ? "动态视频可以渲染" : "视频环境尚未完整"}</span><a href="https://www.remotion.dev/" target="_blank" rel="noreferrer">查看 Remotion 许可</a></div></div></section>
+      <section><span className="setup-step-number">04</span><div><h3>填写你的账号资料</h3><p>这些信息会作为每次生成的稳定背景，不会提交到 Git 仓库。</p><div className="setup-profile-grid"><label>称呼<input value={settings.name} onChange={(event) => field("name", event.target.value)} /></label><label>当前身份<input value={settings.role} onChange={(event) => field("role", event.target.value)} /></label><label className="full">真实经历<textarea value={settings.experience} onChange={(event) => field("experience", event.target.value)} /></label><label className="full">目标受众<textarea value={settings.audience} onChange={(event) => field("audience", event.target.value)} /></label><label className="full">表达风格<textarea value={settings.style} onChange={(event) => field("style", event.target.value)} /></label><label className="full">内容与商业目标<textarea value={settings.goal} onChange={(event) => field("goal", event.target.value)} /></label></div></div></section>
     </div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose}>稍后设置</button><button className="primary-button" onClick={onSave}>保存并开始使用</button></div>
   </section></div>;
@@ -1981,6 +2480,7 @@ function CodexConnectionPanel({ bridgeState, bridgeInfo, report, loading, onChec
     <div className="connection-meta"><span>Bridge {bridgeInfo?.version || "—"}</span><span>{bridgeInfo?.activeRuns || 0} 个运行中任务</span></div>
     <button className="primary-button" onClick={onCheck} disabled={loading}>{loading ? "正在检查…" : "重新检测连接"}</button>
     {report && <div className="doctor-list">{report.checks.map((check) => <article key={check.id} className={`doctor-${check.status}`}><i>{check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "×"}</i><div><strong>{doctorCheckCopy[check.id] || check.id}</strong><small>{check.message}</small>{check.fix && <p>{check.fix}</p>}</div></article>)}</div>}
+    <div className="remotion-license-note"><strong>Remotion 使用提醒</strong><p>个人或不超过 3 人的组织目前可使用免费许可证并用于商业内容；团队扩大，或把工作站开放为供他人生成视频的应用时，需要重新核对并配置相应商业许可。</p><a href="https://www.remotion.dev/" target="_blank" rel="noreferrer">查看 Remotion 官方许可与价格</a></div>
     {bridgeState === "offline" && <div className="connection-offline"><strong>先启动本机 Bridge</strong><code>npm run start:bridge</code></div>}
   </section>;
 }
@@ -2103,10 +2603,13 @@ function ArtifactPreview({ runId, manifest }: { runId: string; manifest: Artifac
 function BundleExportPanel({ item }: { item: ContentItem }) {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const videoDelivery = exportableVideoRender(item);
   const included = [
     item.script.trim() ? "内容稿" : "",
     item.htmlState === "已生成" && item.htmlManifest && item.htmlRunId ? "HTML" : "",
     item.coverState === "已生成" && item.coverManifest && item.coverRunId ? "三张封面" : "",
+    item.videoEnabled && item.videoPlanState === "已确认" && item.videoPlan ? "视频场景方案" : "",
+    item.videoEnabled && videoDelivery ? `MP4 与 poster${videoDelivery.pending ? "（待验收版）" : ""}` : "",
     item.publishingState === "已生成" && item.publishingManifest && item.publishingRunId ? publishingPackageLabel(item.platforms) : "",
   ].filter(Boolean);
 
@@ -2124,7 +2627,9 @@ function BundleExportPanel({ item }: { item: ContentItem }) {
           html: item.htmlState === "已生成" && item.htmlManifest ? item.htmlRunId : "",
           cover: item.coverState === "已生成" && item.coverManifest ? item.coverRunId : "",
           publishing: item.publishingState === "已生成" && item.publishingManifest ? item.publishingRunId : "",
+          "video-render": item.videoEnabled && videoDelivery ? videoDelivery.runId : "",
         },
+        videoPlan: item.videoEnabled && item.videoPlanState === "已确认" ? item.videoPlan : null,
       });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2180,7 +2685,122 @@ function VisualGenerationPanel({ item, taskType, activeRun, onGenerate, onCancel
   </div>;
 }
 
-function InlineCreationWorkflow({ item, activeRun, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual }: {
+function VideoPlanPanel({ item, activeRun, activeSceneId, onActiveScene, onSource, onAspect, onDuration, onStyle, onGenerate, onCancel, onPlan, onAccept }: {
+  item: ContentItem;
+  activeRun: BridgeRun | null;
+  activeSceneId: string;
+  onActiveScene: (sceneId: string) => void;
+  onSource: (source: VideoSource) => void;
+  onAspect: (aspect: VideoAspectRatio) => void;
+  onDuration: (duration: VideoDurationFrames) => void;
+  onStyle: (style: VideoStyle) => void;
+  onGenerate: () => void;
+  onCancel: () => void;
+  onPlan: (plan: VideoScenePlan) => void;
+  onAccept: () => void;
+}) {
+  const plan = item.pendingVideoPlan || item.videoPlan;
+  const editable = Boolean(item.pendingVideoPlan);
+  const isRunning = activeRun?.taskType === "video-plan" && (activeRun.status === "queued" || activeRun.status === "running");
+  const elapsed = useRunElapsedSeconds(isRunning ? activeRun : null);
+  const htmlReady = item.htmlState === "已生成" && Boolean(item.htmlManifest && item.htmlRunId);
+  const totalFrames = plan?.scenes.reduce((sum, scene) => sum + scene.durationInFrames, 0) || 0;
+  const maxSceneFrames = plan?.durationInFrames === 900 ? 300 : 900;
+
+  function updateScene(index: number, patch: Partial<VideoScene>) {
+    if (!plan || !editable) return;
+    const patchedScenes = plan.scenes.map((scene, sceneIndex) => sceneIndex === index ? { ...scene, ...patch } : scene);
+    const scenes = patch.durationInFrames === undefined ? recalculateSceneStarts(patchedScenes) : rebalanceEditedSceneDuration(patchedScenes, index, patch.durationInFrames, plan.durationInFrames, maxSceneFrames);
+    onPlan({ ...plan, scenes });
+  }
+
+  function moveScene(index: number, direction: -1 | 1) {
+    if (!plan || !editable) return;
+    const target = index + direction;
+    if (target < 0 || target >= plan.scenes.length) return;
+    const scenes = [...plan.scenes];
+    [scenes[index], scenes[target]] = [scenes[target], scenes[index]];
+    onPlan({ ...plan, scenes: recalculateSceneStarts(scenes) });
+  }
+
+  function copyScene(index: number) {
+    if (!plan || !editable || plan.scenes.length >= 120) return;
+    const source = plan.scenes[index];
+    const copy = { ...source, id: `scene-copy-${Date.now().toString(36)}`, headline: `${source.headline}（副本）` };
+    const scenes = [...plan.scenes.slice(0, index + 1), copy, ...plan.scenes.slice(index + 1)];
+    onPlan({ ...plan, scenes: rebalanceScenes(scenes, plan.durationInFrames) });
+  }
+
+  function deleteScene(index: number) {
+    if (!plan || !editable || plan.scenes.length <= 2) return;
+    onPlan({ ...plan, scenes: rebalanceScenes(plan.scenes.filter((_, sceneIndex) => sceneIndex !== index), plan.durationInFrames) });
+  }
+
+  return <div className="video-plan-panel">
+    <div className="video-choice-row"><label>生成依据<select value={item.videoSource} onChange={(event) => onSource(event.target.value as VideoSource)}><option value="direct-content">直接根据确认内容</option><option value="accepted-html" disabled={!htmlReady}>基于已确认 HTML{htmlReady ? "" : "（请先接受 HTML）"}</option></select></label><label>视频画幅<select value={item.videoAspectRatio} onChange={(event) => onAspect(event.target.value as VideoAspectRatio)}><option value="16:9">16:9 横版</option><option value="9:16">9:16 竖版</option></select></label><label>目标时长<select value={item.videoDurationInFrames} onChange={(event) => onDuration(Number(event.target.value) as VideoDurationFrames)}><option value={900}>30 秒</option><option value={9000}>5 分钟</option><option value={14400}>8 分钟</option></select></label></div>
+    <div className="inline-style-grid video-style-grid">{(Object.entries(videoStyles) as [VideoStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.videoStyle === style ? "selected" : ""} key={style} onClick={() => onStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div>
+    <div className="video-plan-actions"><div><strong>{isRunning ? "Codex 正在拆分场景" : plan ? `${plan.scenes.length} 个场景 · ${(totalFrames / 30).toFixed(1)} 秒` : "尚未生成场景方案"}</strong><small>{item.videoSource === "accepted-html" ? "将保留已确认 HTML 的章节顺序和核心信息" : "只读取已确认内容，不依赖 HTML"}</small></div><div><button className="primary-button" onClick={onGenerate} disabled={isRunning}>{isRunning ? `生成中 · ${elapsedLabel(elapsed)}` : plan ? "重新生成" : "生成场景方案"}</button>{isRunning && <button className="secondary-button" onClick={onCancel}>停止</button>}</div></div>
+    {isRunning && <div className="run-activity" role="status"><div className="run-activity-copy"><span className="run-spinner" /><div><strong>{activeRun?.status === "queued" ? "已提交，等待 Codex 接收" : "正在把内容转换为可编辑的画面节奏"}</strong><small>本阶段只生成 JSON 场景方案，不会直接渲染 MP4。</small></div></div><div className="run-progress"><i /></div></div>}
+    {!isRunning && item.videoPlanState === "失败" && item.videoPlanError && <div className="video-plan-error" role="alert"><strong>场景方案生成失败</strong><span>{item.videoPlanError}</span><small>修正问题后可直接点击“生成场景方案”重试。</small></div>}
+    {plan && <div className="scene-editor"><div className="scene-editor-summary"><span>时间轴 {totalFrames}/{plan.durationInFrames} 帧 · {videoDurationLabel(plan.durationInFrames)}</span><span>{isConfirmableVideoPlan(plan) ? "可确认" : `请将总时长调整为 ${plan.durationInFrames} 帧，每场 30～${maxSceneFrames} 帧`}</span></div>{plan.scenes.map((scene, index) => <article className={activeSceneId === scene.id ? "active" : ""} key={scene.id} onFocusCapture={() => onActiveScene(scene.id)} onClick={() => onActiveScene(scene.id)}><div className="scene-index"><strong>{String(index + 1).padStart(2, "0")}</strong><small>{(scene.startFrame / 30).toFixed(1)}s</small></div><div className="scene-fields"><div className="scene-field-row"><label>类型<select disabled={!editable} value={scene.type} onChange={(event) => updateScene(index, { type: event.target.value as VideoScene["type"] })}>{["opening", "statement", "flow", "comparison", "screenshot", "summary"].map((type) => <option key={type}>{type}</option>)}</select></label><label>时长（帧）<input disabled={!editable} type="number" min="30" max={maxSceneFrames} value={scene.durationInFrames} onChange={(event) => updateScene(index, { durationInFrames: Math.max(30, Math.min(maxSceneFrames, Number(event.target.value) || 30)) })} /></label><label>转场<select disabled={!editable} value={scene.transition} onChange={(event) => updateScene(index, { transition: event.target.value as VideoScene["transition"] })}>{["none", "fade", "slide", "wipe"].map((value) => <option key={value}>{value}</option>)}</select></label></div><label>画面标题<input disabled={!editable} value={scene.headline} onChange={(event) => updateScene(index, { headline: event.target.value })} /></label><label>画面正文<textarea disabled={!editable} value={scene.body} onChange={(event) => updateScene(index, { body: event.target.value })} /></label><label>旁白<textarea disabled={!editable} value={scene.narration} onChange={(event) => updateScene(index, { narration: event.target.value })} /></label><label className="scene-caption"><input disabled={!editable} type="checkbox" checked={scene.showCaptions} onChange={(event) => updateScene(index, { showCaptions: event.target.checked })} />显示字幕</label></div>{editable && <div className="scene-operations"><button onClick={() => moveScene(index, -1)} disabled={index === 0}>↑</button><button onClick={() => moveScene(index, 1)} disabled={index === plan.scenes.length - 1}>↓</button><button onClick={() => copyScene(index)}>复制</button><button onClick={() => deleteScene(index)} disabled={plan.scenes.length <= 2}>删除</button></div>}</article>)}</div>}
+    {plan?.missingMaterials.length ? <div className="video-missing"><strong>待补素材</strong><ul>{plan.missingMaterials.map((material) => <li key={material}>{material}</li>)}</ul></div> : null}
+    {item.pendingVideoPlan && <div className="artifact-accept"><span>确认后会冻结这版场景方案，并解锁素材预览与 MP4 渲染。</span><button className="primary-button" onClick={onAccept} disabled={!isConfirmableVideoPlan(item.pendingVideoPlan)}>确认场景方案</button></div>}
+  </div>;
+}
+
+function VideoArtifactPreview({ runId, manifest }: { runId: string; manifest: VideoRenderManifest }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let disposed = false;
+    const created: string[] = [];
+    void Promise.all(manifest.artifacts.map(async (artifact) => {
+      const url = URL.createObjectURL(await getArtifactBlob(runId, artifact.id)); created.push(url); return [artifact.id, url] as const;
+    })).then((entries) => { if (!disposed) setUrls(Object.fromEntries(entries)); }).catch(() => {});
+    return () => { disposed = true; created.forEach(URL.revokeObjectURL); };
+  }, [manifest, runId]);
+  const video = manifest.artifacts.find((artifact) => artifact.type === "video-mp4");
+  const poster = manifest.artifacts.find((artifact) => artifact.type === "video-poster");
+  return <div className="rendered-video-preview">{video && urls[video.id] ? <video controls src={urls[video.id]} poster={poster ? urls[poster.id] : undefined} /> : <div className="player-loading">正在加载成片…</div>}<div>{video && urls[video.id] && <a className="secondary-button" href={urls[video.id]} download="video.mp4">下载 MP4</a>}{poster && urls[poster.id] && <a className="secondary-button" href={urls[poster.id]} download="video-poster.png">下载 poster</a>}</div></div>;
+}
+
+function VideoRenderPanel({ item, activeRun, activeSceneId, onActiveScene, onRefresh, onUpload, onDelete, onAttach, onAudio, onCaptions, onRender, onResume, onCancel, onAccept }: {
+  item: ContentItem;
+  activeRun: BridgeRun | null;
+  activeSceneId: string;
+  onActiveScene: (sceneId: string) => void;
+  onRefresh: () => void;
+  onUpload: (file: File) => void;
+  onDelete: (assetId: string) => void;
+  onAttach: (asset: LocalAsset) => void;
+  onAudio: (assetId: string) => void;
+  onCaptions: (assetId: string) => void;
+  onRender: () => void;
+  onResume: () => void;
+  onCancel: () => void;
+  onAccept: () => void;
+}) {
+  const isRunning = activeRun?.taskType === "video-render" && (activeRun.status === "queued" || activeRun.status === "running");
+  const elapsed = useRunElapsedSeconds(isRunning ? activeRun : null);
+  const plan = item.pendingVideoPlan || item.videoPlan;
+  const manifest = item.pendingVideoRenderManifest || item.videoRenderManifest;
+  const runId = item.pendingVideoRenderManifest ? item.pendingVideoRenderRunId : item.videoRenderRunId;
+  const audioAssets = item.videoAssets.filter((asset) => asset.kind === "audio");
+  const captionAssets = item.videoAssets.filter((asset) => asset.kind === "captions");
+  const canResume = item.videoRenderState === "失败" && Boolean(item.pendingVideoRenderRunId);
+  return <div className="video-render-panel">
+    <div className="video-material-head"><div><strong>素材、旁白与字幕</strong><small>文件只保存在本机 `.data`，渲染时复制到隔离任务目录。</small></div><div><label className="secondary-button upload-button">登记本地文件<input type="file" accept=".png,.jpg,.jpeg,.svg,.mp3,.wav,.mp4,.srt,.vtt" onChange={(event) => { const file = event.target.files?.[0]; if (file) onUpload(file); event.target.value = ""; }} /></label><button className="text-button" onClick={onRefresh}>刷新</button></div></div>
+    <div className="video-input-selects"><label>旁白音频<select value={item.videoAudioAssetId} onChange={(event) => onAudio(event.target.value)}><option value="">不使用音频</option>{audioAssets.map((asset) => <option value={asset.assetId} key={asset.assetId}>{asset.name}</option>)}</select></label><label>字幕文件<select value={item.videoCaptionsAssetId} onChange={(event) => onCaptions(event.target.value)}><option value="">不导入字幕</option>{captionAssets.map((asset) => <option value={asset.assetId} key={asset.assetId}>{asset.name}</option>)}</select></label></div>
+    <div className="video-asset-list">{item.videoAssets.length ? item.videoAssets.map((asset) => { const boundScene = plan?.scenes.find((scene) => scene.materialIds.includes(asset.relativePath)); const bound = Boolean(boundScene); return <article key={asset.assetId}><div><span>{asset.kind}</span><strong>{asset.name}</strong><small>{(asset.size / 1024 / 1024).toFixed(2)} MB</small>{boundScene && <small className="asset-bound">用于：{boundScene.headline}</small>}</div><div>{(asset.kind === "image" || asset.kind === "video") && <button className="text-button" disabled={bound} onClick={() => onAttach(asset)}>{bound ? "已用于预览" : "绑定到画面场景"}</button>}<button className="text-button danger" onClick={() => onDelete(asset.assetId)}>删除</button></div></article>; }) : <p>尚未登记素材。没有素材也可以先预览并渲染纯图形版本。</p>}</div>
+    {plan && <div><div className="video-preview-head"><strong>Remotion 实时预览</strong><small>{item.videoPlanState === "已确认" ? "画面和素材来自当前已确认方案" : "当前有待确认修改；预览已同步，确认后才能渲染"} · 编辑节点与播放画面双向同步 · {item.videoCaptionsAssetId ? "字幕按导入文件时间轴显示" : "字幕按每个场景的旁白与时长自动同步"}</small></div><VideoPreview contentId={item.id} plan={plan} assets={item.videoAssets} audioAssetId={item.videoAudioAssetId} captionsAssetId={item.videoCaptionsAssetId} activeSceneId={activeSceneId} onActiveScene={onActiveScene} /></div>}
+    <div className="video-render-actions"><div><strong>{isRunning ? `${activeRun?.phase === "bundling" ? "正在准备视频工程" : activeRun?.phase === "merging" ? "正在合并已完成分段" : activeRun?.phase === "validating" ? "正在验收 MP4 与 poster" : "正在分段渲染 MP4"} · ${activeRun?.progress || 0}%` : `渲染状态：${item.videoRenderState}`}</strong><small>{isRunning ? `已运行 ${elapsedLabel(elapsed)}${activeRun?.segmentCount ? ` · 分段 ${activeRun.segmentIndex || 1}/${activeRun.segmentCount}` : ""}，可安全停止` : canResume ? "继续后会复用已完成分段，只渲染剩余部分。" : item.pendingVideoPlan ? "将使用当前预览方案，自动确认后开始本地渲染。" : "渲染在本机执行，不会调用 Codex 或大模型。"}</small></div><div>{canResume ? <button className="primary-button" onClick={onResume}>继续渲染</button> : <button className="primary-button" onClick={onRender} disabled={isRunning || !isConfirmableVideoPlan(plan)}>{manifest ? "重新渲染" : item.pendingVideoPlan ? "确认并渲染 MP4" : "渲染 MP4"}</button>}{isRunning && <button className="secondary-button" onClick={onCancel}>停止渲染</button>}</div></div>
+    {isRunning && <div className="render-progress"><i style={{ width: `${Math.max(2, activeRun?.progress || 0)}%` }} /></div>}
+    {!isRunning && item.videoRenderState === "失败" && item.videoRenderError && <div className="video-plan-error" role="alert"><strong>MP4 渲染失败</strong><span>{item.videoRenderError}</span><small>错误已经保留在这里，修正后可以直接重试。</small></div>}
+    {manifest && runId && <VideoArtifactPreview runId={runId} manifest={manifest} />}
+    {item.pendingVideoRenderManifest && <div className="artifact-accept"><span>自动校验已通过，请播放检查画面、字幕和声音。</span><button className="primary-button" onClick={onAccept}>验收动态视频</button></div>}
+  </div>;
+}
+
+function InlineCreationWorkflow({ item, activeRun, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual, onVideoSource, onVideoAspect, onVideoDuration, onVideoStyle, onGenerateVideo, onVideoPlan, onAcceptVideo, onRefreshAssets, onUploadAsset, onDeleteAsset, onAttachAsset, onAudio, onCaptions, onRenderVideo, onResumeVideo, onAcceptRender }: {
   item: ContentItem;
   activeRun: BridgeRun | null;
   onScript: (script: string) => void;
@@ -2193,7 +2813,25 @@ function InlineCreationWorkflow({ item, activeRun, onScript, onConfirm, onGenera
   onGenerateVisual: (kind: "html" | "cover" | "publishing") => void;
   onAcceptVisual: (kind: "html" | "cover" | "publishing") => void;
   onContinueVisual: (kind: "html" | "cover" | "publishing", instruction: string) => void;
+  onVideoSource: (source: VideoSource) => void;
+  onVideoAspect: (aspect: VideoAspectRatio) => void;
+  onVideoDuration: (duration: VideoDurationFrames) => void;
+  onVideoStyle: (style: VideoStyle) => void;
+  onGenerateVideo: () => void;
+  onVideoPlan: (plan: VideoScenePlan) => void;
+  onAcceptVideo: () => void;
+  onRefreshAssets: () => void;
+  onUploadAsset: (file: File) => void;
+  onDeleteAsset: (assetId: string) => void;
+  onAttachAsset: (asset: LocalAsset) => void;
+  onAudio: (assetId: string) => void;
+  onCaptions: (assetId: string) => void;
+  onRenderVideo: () => void;
+  onResumeVideo: () => void;
+  onAcceptRender: () => void;
 }) {
+  const [selectedVideoSceneId, setSelectedVideoSceneId] = useState("");
+  const activeVideoSceneId = (item.pendingVideoPlan || item.videoPlan)?.scenes.some((scene) => scene.id === selectedVideoSceneId) ? selectedVideoSceneId : (item.pendingVideoPlan || item.videoPlan)?.scenes[0]?.id || "";
   const confirmed = item.draftState === "已确认";
   const missingAssets = missingPublishingAssets(item);
   const publishingReady = missingAssets.length === 0;
@@ -2217,25 +2855,34 @@ function InlineCreationWorkflow({ item, activeRun, onScript, onConfirm, onGenera
     {!confirmed && <div className="inline-gate"><strong>视觉制作尚未解锁</strong><p>先完成上面的内容回填和确认。这样修改观点或口播时，不需要反复重做 HTML 和封面。</p></div>}
 
     {confirmed && <div className="inline-assets">
-      <section>
+      {item.htmlEnabled && <section>
         <div className="inline-section-head"><div><span>05 · HTML 录屏页</span><h3>选择页面风格后单独生成</h3></div><strong className={`light-state light-${item.htmlState}`}>{item.htmlState}</strong></div>
         <div className="inline-style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div>
         <VisualGenerationPanel item={item} taskType="html" activeRun={activeRun} onGenerate={() => onGenerateVisual("html")} onCancel={onCancel} onAccept={() => onAcceptVisual("html")} onContinue={(instruction) => onContinueVisual("html", instruction)} />
-      </section>
+      </section>}
       <section>
         <div className="inline-section-head"><div><span>06 · 三尺寸封面</span><h3>选择封面风格后单独生成</h3></div><strong className={`light-state light-${item.coverState}`}>{item.coverState}</strong></div>
         <div className="inline-style-grid">{(Object.entries(coverStyles) as [CoverStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.coverStyle === style ? "selected" : ""} key={style} onClick={() => onCoverStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div>
         <VisualGenerationPanel item={item} taskType="cover" activeRun={activeRun} onGenerate={() => onGenerateVisual("cover")} onCancel={onCancel} onAccept={() => onAcceptVisual("cover")} onContinue={(instruction) => onContinueVisual("cover", instruction)} />
       </section>
+      {item.videoEnabled && <section>
+        <div className="inline-section-head"><div><span>07 · 动态视频</span><h3>先生成并确认可编辑场景方案</h3></div><strong className={`light-state light-${item.videoPlanState}`}>{item.videoPlanState}</strong></div>
+        <VideoPlanPanel item={item} activeRun={activeRun} activeSceneId={activeVideoSceneId} onActiveScene={setSelectedVideoSceneId} onSource={onVideoSource} onAspect={onVideoAspect} onDuration={onVideoDuration} onStyle={onVideoStyle} onGenerate={onGenerateVideo} onCancel={onCancel} onPlan={onVideoPlan} onAccept={onAcceptVideo} />
+        <VideoRenderPanel item={item} activeRun={activeRun} activeSceneId={activeVideoSceneId} onActiveScene={setSelectedVideoSceneId} onRefresh={onRefreshAssets} onUpload={onUploadAsset} onDelete={onDeleteAsset} onAttach={onAttachAsset} onAudio={onAudio} onCaptions={onCaptions} onRender={onRenderVideo} onResume={onResumeVideo} onCancel={onCancel} onAccept={onAcceptRender} />
+      </section>}
       <section>
-        <div className="inline-section-head"><div><span>07 · {publishingPackageLabel(item.platforms)}</span><h3>为 {selectedPlatformNames(item.platforms)} 生成发布文案</h3></div><strong className={`light-state light-${item.publishingState}`}>{item.publishingState}</strong></div>
+        <div className="inline-section-head"><div><span>{item.videoEnabled ? "08" : "07"} · {publishingPackageLabel(item.platforms)}</span><h3>为 {selectedPlatformNames(item.platforms)} 生成发布文案</h3></div><strong className={`light-state light-${item.publishingState}`}>{item.publishingState}</strong></div>
         <VisualGenerationPanel item={item} taskType="publishing" activeRun={activeRun} onGenerate={() => onGenerateVisual("publishing")} onCancel={onCancel} onAccept={() => onAcceptVisual("publishing")} onContinue={(instruction) => onContinueVisual("publishing", instruction)} disabled={!publishingReady} disabledReason={publishingDisabledReason(item)} />
+      </section>
+      <section>
+        <div className="inline-section-head"><div><span>{item.videoEnabled ? "09" : "08"} · 完整交付</span><h3>把本期内容与已生成产物一次打包下载</h3></div></div>
+        <BundleExportPanel item={item} />
       </section>
     </div>}
   </section>;
 }
 
-function ContentDetail({ item, activeRun, onStatus, onRecordingMode, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual, onMetric, onMetadata, onDelete, onClose }: {
+function ContentDetail({ item, activeRun, onStatus, onRecordingMode, onScript, onConfirm, onGenerate, onCancel, onApplyVersion, onHtmlStyle, onCoverStyle, onGenerateVisual, onAcceptVisual, onContinueVisual, onHtmlEnabled, onVideoEnabled, onVideoSource, onVideoAspect, onVideoDuration, onVideoStyle, onGenerateVideo, onVideoPlan, onAcceptVideo, onRefreshAssets, onUploadAsset, onDeleteAsset, onAttachAsset, onAudio, onCaptions, onRenderVideo, onResumeVideo, onAcceptRender, onMetric, onMetadata, onDelete, onClose }: {
   item: ContentItem;
   activeRun: BridgeRun | null;
   onStatus: (status: ContentStatus) => void;
@@ -2250,12 +2897,32 @@ function ContentDetail({ item, activeRun, onStatus, onRecordingMode, onScript, o
   onGenerateVisual: (kind: "html" | "cover" | "publishing") => void;
   onAcceptVisual: (kind: "html" | "cover" | "publishing") => void;
   onContinueVisual: (kind: "html" | "cover" | "publishing", instruction: string) => void;
+  onHtmlEnabled: (enabled: boolean) => void;
+  onVideoEnabled: (enabled: boolean) => void;
+  onVideoSource: (source: VideoSource) => void;
+  onVideoAspect: (aspect: VideoAspectRatio) => void;
+  onVideoDuration: (duration: VideoDurationFrames) => void;
+  onVideoStyle: (style: VideoStyle) => void;
+  onGenerateVideo: () => void;
+  onVideoPlan: (plan: VideoScenePlan) => void;
+  onAcceptVideo: () => void;
+  onRefreshAssets: () => void;
+  onUploadAsset: (file: File) => void;
+  onDeleteAsset: (assetId: string) => void;
+  onAttachAsset: (asset: LocalAsset) => void;
+  onAudio: (assetId: string) => void;
+  onCaptions: (assetId: string) => void;
+  onRenderVideo: () => void;
+  onResumeVideo: () => void;
+  onAcceptRender: () => void;
   onMetric: (platform: Platform, field: keyof Omit<Metric, "platform">, value: number) => void;
   onMetadata: (patch: Partial<Pick<ContentItem, "title" | "subtitle" | "publishedAt" | "publishLinks" | "archiveNotes" | "viewpoint">>) => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"brief" | "script" | "production" | "deliverables" | "data">("brief");
+  const [selectedVideoSceneId, setSelectedVideoSceneId] = useState("");
+  const activeVideoSceneId = (item.pendingVideoPlan || item.videoPlan)?.scenes.some((scene) => scene.id === selectedVideoSceneId) ? selectedVideoSceneId : (item.pendingVideoPlan || item.videoPlan)?.scenes[0]?.id || "";
   const contentConfirmed = item.draftState === "已确认";
   const publishingReady = missingPublishingAssets(item).length === 0;
   return <aside className="detail-panel">
@@ -2285,12 +2952,14 @@ function ContentDetail({ item, activeRun, onStatus, onRecordingMode, onScript, o
       {contentConfirmed && <>
         <div className="production-mode-head"><span>{item.recordingMode === "未设置" ? "?" : recordingModeCopy[item.recordingMode].icon}</span><div><small>已确认内容 · 呈现方式</small><strong>{item.recordingMode}</strong></div></div>
         <label className="detail-mode-select">修改录制方式<select value={item.recordingMode} onChange={(e) => onRecordingMode(e.target.value as Exclude<RecordingMode, "未设置">)}><option value="未设置" disabled>请选择</option>{recordingModes.map((mode) => <option key={mode}>{mode}</option>)}</select></label>
-        <section className="asset-builder"><div className="asset-builder-head"><div><span>HTML 录屏页</span><h3>选择页面风格</h3></div><strong className={`asset-state asset-${item.htmlState}`}>{item.htmlState}</strong></div><div className="style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><VisualGenerationPanel item={item} taskType="html" activeRun={activeRun} onGenerate={() => onGenerateVisual("html")} onCancel={onCancel} onAccept={() => onAcceptVisual("html")} onContinue={(instruction) => onContinueVisual("html", instruction)} /></section>
+        <div className="production-output-choice detail-output-choice"><label className={item.htmlEnabled ? "selected" : ""}><input type="checkbox" checked={item.htmlEnabled} onChange={(event) => onHtmlEnabled(event.target.checked)} /><span><strong>HTML 录屏页</strong><small>静态页面录屏</small></span></label><label className={item.videoEnabled ? "selected" : ""}><input type="checkbox" checked={item.videoEnabled} onChange={(event) => onVideoEnabled(event.target.checked)} /><span><strong>动态视频</strong><small>Remotion 场景方案</small></span></label></div>
+        {item.htmlEnabled && <section className="asset-builder"><div className="asset-builder-head"><div><span>HTML 录屏页</span><h3>选择页面风格</h3></div><strong className={`asset-state asset-${item.htmlState}`}>{item.htmlState}</strong></div><div className="style-grid">{(Object.entries(htmlStyles) as [HtmlStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.htmlStyle === style ? "selected" : ""} key={style} onClick={() => onHtmlStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><VisualGenerationPanel item={item} taskType="html" activeRun={activeRun} onGenerate={() => onGenerateVisual("html")} onCancel={onCancel} onAccept={() => onAcceptVisual("html")} onContinue={(instruction) => onContinueVisual("html", instruction)} /></section>}
         <section className="asset-builder"><div className="asset-builder-head"><div><span>三尺寸封面</span><h3>选择封面风格</h3></div><strong className={`asset-state asset-${item.coverState}`}>{item.coverState}</strong></div><div className="style-grid">{(Object.entries(coverStyles) as [CoverStyle, { mark: string; description: string }][]).map(([style, copy]) => <button className={item.coverStyle === style ? "selected" : ""} key={style} onClick={() => onCoverStyle(style)}><i>{copy.mark}</i><strong>{style}</strong><small>{copy.description}</small></button>)}</div><VisualGenerationPanel item={item} taskType="cover" activeRun={activeRun} onGenerate={() => onGenerateVisual("cover")} onCancel={onCancel} onAccept={() => onAcceptVisual("cover")} onContinue={(instruction) => onContinueVisual("cover", instruction)} /></section>
+        {item.videoEnabled && <section className="asset-builder"><div className="asset-builder-head"><div><span>动态视频</span><h3>生成、编辑、预览并本地渲染</h3></div><strong className={`asset-state asset-${item.videoRenderState}`}>{item.videoRenderState}</strong></div><VideoPlanPanel item={item} activeRun={activeRun} activeSceneId={activeVideoSceneId} onActiveScene={setSelectedVideoSceneId} onSource={onVideoSource} onAspect={onVideoAspect} onDuration={onVideoDuration} onStyle={onVideoStyle} onGenerate={onGenerateVideo} onCancel={onCancel} onPlan={onVideoPlan} onAccept={onAcceptVideo} /><VideoRenderPanel item={item} activeRun={activeRun} activeSceneId={activeVideoSceneId} onActiveScene={setSelectedVideoSceneId} onRefresh={onRefreshAssets} onUpload={onUploadAsset} onDelete={onDeleteAsset} onAttach={onAttachAsset} onAudio={onAudio} onCaptions={onCaptions} onRender={onRenderVideo} onResume={onResumeVideo} onCancel={onCancel} onAccept={onAcceptRender} /></section>}
         <section className="asset-builder"><div className="asset-builder-head"><div><span>{publishingPackageLabel(item.platforms)}</span><h3>为 {selectedPlatformNames(item.platforms)} 生成、检查并下载 Markdown</h3></div><strong className={`asset-state asset-${item.publishingState}`}>{item.publishingState}</strong></div><VisualGenerationPanel item={item} taskType="publishing" activeRun={activeRun} onGenerate={() => onGenerateVisual("publishing")} onCancel={onCancel} onAccept={() => onAcceptVisual("publishing")} onContinue={(instruction) => onContinueVisual("publishing", instruction)} disabled={!publishingReady} disabledReason={publishingDisabledReason(item)} /></section>
       </>}
     </div>}
-    {tab === "deliverables" && <div className="detail-body"><div className="deliverable-status-grid"><article><span>内容稿</span><strong>{item.draftState}</strong><small>可查看、编辑并人工确认</small></article><article><span>HTML 页面</span><strong>{item.htmlState}</strong><small>{item.htmlStyle}</small></article><article><span>三尺寸封面</span><strong>{item.coverState}</strong><small>{item.coverStyle}</small></article><article><span>{publishingPackageLabel(item.platforms)}</span><strong>{item.publishingState}</strong><small>{selectedPlatformNames(item.platforms)} · 验收后可下载</small></article></div><BundleExportPanel item={item} />{item.publishingManifest && item.publishingRunId && <ArtifactPreview runId={item.publishingRunId} manifest={item.publishingManifest} />}<DetailBlock label="已确认内容摘要" text={item.script || "尚未回填内容稿。"} /></div>}
+    {tab === "deliverables" && <div className="detail-body"><div className="deliverable-status-grid"><article><span>内容稿</span><strong>{item.draftState}</strong><small>可查看、编辑并人工确认</small></article><article><span>HTML 页面</span><strong>{item.htmlEnabled ? item.htmlState : "未选择"}</strong><small>{item.htmlStyle}</small></article><article><span>动态视频方案</span><strong>{item.videoEnabled ? item.videoPlanState : "未选择"}</strong><small>{item.videoStyle}</small></article><article><span>动态视频成片</span><strong>{item.videoEnabled ? item.videoRenderState : "未选择"}</strong><small>{videoDurationLabel(item.videoDurationInFrames)} · {item.videoAspectRatio} · Remotion</small></article><article><span>三尺寸封面</span><strong>{item.coverState}</strong><small>{item.coverStyle}</small></article><article><span>{publishingPackageLabel(item.platforms)}</span><strong>{item.publishingState}</strong><small>{selectedPlatformNames(item.platforms)} · 验收后可下载</small></article></div><BundleExportPanel item={item} />{item.videoRenderManifest && item.videoRenderRunId && <VideoArtifactPreview runId={item.videoRenderRunId} manifest={item.videoRenderManifest} />}{item.publishingManifest && item.publishingRunId && <ArtifactPreview runId={item.publishingRunId} manifest={item.publishingManifest} />}<DetailBlock label="已确认内容摘要" text={item.script || "尚未回填内容稿。"} /></div>}
     {tab === "data" && <div className="metric-editor"><p>发布后录入各平台数据，工作台会自动汇总。</p>{item.metrics.map((metric) => <fieldset key={metric.platform}><legend>{metric.platform}</legend><div>{(["views", "likes", "saves", "comments", "shares", "follows"] as const).map((field) => <label key={field}>{({ views: "播放", likes: "点赞", saves: "收藏", comments: "评论", shares: "转发", follows: "关注" })[field]}<input type="number" min="0" value={metric[field]} onChange={(e) => onMetric(metric.platform, field, Math.max(0, Number(e.target.value)))} /></label>)}</div></fieldset>)}</div>}
   </aside>;
 }

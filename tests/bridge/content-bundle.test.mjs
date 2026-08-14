@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -52,4 +52,39 @@ test("content bundle includes HTML by stable artifact type when its id varies", 
   }, { get: (runId) => runId === record.runId ? record : null });
   assert.equal(fileCount, 3);
   assert.match(buffer.toString("utf8"), /recording\/presentation\.html/);
+});
+
+test("content bundle independently includes an accepted video plan, MP4, and poster", async () => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "content-bundle-video-"));
+  await mkdir(path.join(workspace, "output"));
+  await writeFile(path.join(workspace, "output/video.mp4"), Buffer.from("fake-mp4-for-bundle"));
+  await writeFile(path.join(workspace, "output/video-poster.png"), Buffer.from("fake-poster-for-bundle"));
+  const scenePlan = JSON.parse(await readFile(new URL("../../video-renderer/fixtures/sample-scene-plan.json", import.meta.url), "utf8"));
+  const record = {
+    runId: "run-a1b2c3d4",
+    contentId: "content-001",
+    taskType: "video-render",
+    status: "completed",
+    workspace,
+    artifactManifest: {
+      artifacts: [
+        { id: "video-mp4", type: "video-mp4", path: "output/video.mp4" },
+        { id: "video-poster", type: "video-poster", path: "output/video-poster.png" },
+      ],
+    },
+  };
+  const { buffer, fileCount } = await buildContentBundle({
+    contentId: "content-001",
+    title: "RAG flow",
+    subtitle: "",
+    platforms: ["B站"],
+    script: "content",
+    videoPlan: scenePlan,
+    runIds: { "video-render": record.runId },
+  }, { get: (runId) => runId === record.runId ? record : null });
+  assert.equal(fileCount, 5);
+  const names = buffer.toString("utf8");
+  assert.match(names, /video\/video-scene-plan\.json/);
+  assert.match(names, /video\/video\.mp4/);
+  assert.match(names, /video\/video-poster\.png/);
 });

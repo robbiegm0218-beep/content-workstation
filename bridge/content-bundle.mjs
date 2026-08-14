@@ -1,14 +1,17 @@
 import { HttpError } from "./security.mjs";
 import { openRegisteredArtifact } from "./artifact-access.mjs";
+import { validateVideoPlanSemantics } from "./video-plan-validator.mjs";
 
 const PLATFORM_NAMES = new Set(["B站", "小红书", "视频号", "抖音"]);
-const RUN_TYPES = ["html", "cover", "publishing"];
+const RUN_TYPES = ["html", "cover", "publishing", "video-render"];
 const FILE_NAMES = {
   "recording-html": "recording/presentation.html",
   "cover-16x9": "covers/cover-16x9.png",
   "cover-4x3": "covers/cover-4x3.png",
   "cover-3x4": "covers/cover-3x4.png",
   "publishing-package": "publishing/publishing-package.md",
+  "video-mp4": "video/video.mp4",
+  "video-poster": "video/video-poster.png",
 };
 
 function assertPlainObject(value, field) {
@@ -19,7 +22,7 @@ function assertPlainObject(value, field) {
 
 export function validateContentBundleInput(input) {
   assertPlainObject(input, "request body");
-  const allowedKeys = new Set(["contentId", "title", "subtitle", "platforms", "script", "runIds"]);
+  const allowedKeys = new Set(["contentId", "title", "subtitle", "platforms", "script", "runIds", "videoPlan"]);
   for (const key of Object.keys(input)) {
     if (!allowedKeys.has(key)) throw new HttpError(400, "UNKNOWN_FIELD", `Unsupported field: ${key}`);
   }
@@ -48,6 +51,14 @@ export function validateContentBundleInput(input) {
       throw new HttpError(400, "INVALID_RUN_ID", `${key} run id is invalid`);
     }
   }
+  if (input.videoPlan !== undefined && input.videoPlan !== null) {
+    assertPlainObject(input.videoPlan, "videoPlan");
+    try {
+      validateVideoPlanSemantics(input.videoPlan);
+    } catch (error) {
+      throw new HttpError(400, "INVALID_VIDEO_PLAN", error.message);
+    }
+  }
   return {
     contentId: input.contentId,
     title: input.title.trim(),
@@ -55,6 +66,7 @@ export function validateContentBundleInput(input) {
     platforms: [...input.platforms],
     script: input.script,
     runIds: Object.fromEntries(RUN_TYPES.map((key) => [key, input.runIds[key] || ""])),
+    videoPlan: input.videoPlan ? structuredClone(input.videoPlan) : null,
   };
 }
 
@@ -144,6 +156,7 @@ export async function buildContentBundle(input, taskManager) {
   const data = validateContentBundleInput(input);
   const files = [];
   if (data.script.trim()) files.push({ name: "content/content-script.md", data: Buffer.from(data.script, "utf8") });
+  if (data.videoPlan) files.push({ name: "video/video-scene-plan.json", data: Buffer.from(`${JSON.stringify(data.videoPlan, null, 2)}\n`, "utf8") });
 
   for (const taskType of RUN_TYPES) {
     const runId = data.runIds[taskType];
@@ -173,6 +186,9 @@ export async function buildContentBundle(input, taskManager) {
     "目录说明：",
     "- content/content-script.md：已确认内容稿",
     "- recording/presentation.html：HTML 录屏页面（如已验收）",
+    "- video/video-scene-plan.json：已确认视频场景方案（如已确认）",
+    "- video/video.mp4：Remotion 动态视频成片（如已验收）",
+    "- video/video-poster.png：动态视频 poster（如已验收）",
     "- covers/：16:9、4:3、3:4 三尺寸封面（如已验收）",
     "- publishing/publishing-package.md：平台发布文案（如已验收）",
     "",

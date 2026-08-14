@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { SUPPORTED_TASK_TYPES } from "./config.mjs";
+import { validateVideoPlanSemantics } from "./video-plan-validator.mjs";
 
 const allowedCreateRunKeys = new Set([
   "contentId",
@@ -11,7 +12,12 @@ const allowedCreateRunKeys = new Set([
   "creatorContext",
   "contentBrief",
   "confirmedContent",
-  "styleConfig"
+  "styleConfig",
+  "acceptedHtml",
+  "scenePlan",
+  "assetIds",
+  "audioAssetId",
+  "captionsAssetId"
 ]);
 
 export class HttpError extends Error {
@@ -95,7 +101,7 @@ export function validateCreateRunInput(input) {
     }
   }
   if (!SUPPORTED_TASK_TYPES.has(input.taskType)) {
-    throw new HttpError(400, "UNSUPPORTED_TASK_TYPE", "taskType must be research, angles, content, html, cover, or publishing");
+    throw new HttpError(400, "UNSUPPORTED_TASK_TYPE", "taskType is not supported");
   }
   if (typeof input.contentId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(input.contentId)) {
     throw new HttpError(400, "INVALID_CONTENT_ID", "contentId contains unsupported characters");
@@ -110,11 +116,39 @@ export function validateCreateRunInput(input) {
   if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content") {
     assertPlainObject(input.creatorContext, "creatorContext");
     assertPlainObject(input.contentBrief, "contentBrief");
+  } else if (input.taskType === "video-render") {
+    assertPlainObject(input.scenePlan, "scenePlan");
+    try { validateVideoPlanSemantics(input.scenePlan); } catch (error) { throw new HttpError(400, "INVALID_VIDEO_PLAN", error.message); }
+    if (!Array.isArray(input.assetIds) || input.assetIds.length > 30 || input.assetIds.some((id) => typeof id !== "string" || !/^asset-[a-f0-9-]+$/.test(id))) {
+      throw new HttpError(400, "INVALID_ASSET_IDS", "assetIds must contain at most 30 registered asset IDs");
+    }
+    if (new Set(input.assetIds).size !== input.assetIds.length) {
+      throw new HttpError(400, "DUPLICATE_ASSET_IDS", "assetIds must not contain duplicates");
+    }
+    for (const [field, value] of [["audioAssetId", input.audioAssetId], ["captionsAssetId", input.captionsAssetId]]) {
+      if (value !== undefined && value !== "" && (typeof value !== "string" || !/^asset-[a-f0-9-]+$/.test(value))) throw new HttpError(400, "INVALID_ASSET_ID", `${field} is invalid`);
+      if (value && !input.assetIds.includes(value)) throw new HttpError(400, "ASSET_NOT_REGISTERED_FOR_RUN", `${field} must also appear in assetIds`);
+    }
   } else {
     if (typeof input.confirmedContent !== "string" || input.confirmedContent.trim().length === 0) {
       throw new HttpError(400, "CONFIRMED_CONTENT_REQUIRED", "confirmedContent is required for visual tasks");
     }
     assertPlainObject(input.styleConfig, "styleConfig");
+    if (input.taskType === "video-plan") {
+      const sourceMode = input.styleConfig.sourceMode;
+      if (sourceMode !== "direct-content" && sourceMode !== "accepted-html") {
+        throw new HttpError(400, "INVALID_VIDEO_SOURCE", "video-plan sourceMode must be direct-content or accepted-html");
+      }
+      if (input.styleConfig.aspectRatio !== undefined && input.styleConfig.aspectRatio !== "16:9" && input.styleConfig.aspectRatio !== "9:16") {
+        throw new HttpError(400, "INVALID_VIDEO_ASPECT", "video-plan aspectRatio must be 16:9 or 9:16");
+      }
+      if (sourceMode === "accepted-html" && (typeof input.acceptedHtml !== "string" || !input.acceptedHtml.includes("<html"))) {
+        throw new HttpError(400, "ACCEPTED_HTML_REQUIRED", "acceptedHtml is required when video-plan uses accepted-html");
+      }
+      if (typeof input.acceptedHtml === "string" && input.acceptedHtml.length > 1_500_000) {
+        throw new HttpError(400, "ACCEPTED_HTML_TOO_LARGE", "acceptedHtml must be at most 1500000 characters");
+      }
+    }
   }
 
   return {
@@ -125,7 +159,12 @@ export function validateCreateRunInput(input) {
     creatorContext: input.creatorContext ?? null,
     contentBrief: input.contentBrief ?? null,
     confirmedContent: input.confirmedContent ?? null,
-    styleConfig: input.styleConfig ?? null
+    styleConfig: input.styleConfig ?? null,
+    acceptedHtml: input.acceptedHtml ?? null,
+    scenePlan: input.scenePlan ?? null,
+    assetIds: input.assetIds ?? [],
+    audioAssetId: input.audioAssetId ?? "",
+    captionsAssetId: input.captionsAssetId ?? ""
   };
 }
 

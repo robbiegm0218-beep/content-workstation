@@ -14,6 +14,8 @@ test("local distribution exposes a single startup command and first-run document
   ]);
 
   assert.equal(packageJson.scripts["dev:local"], "node scripts/dev-local.mjs");
+  assert.equal(packageJson.scripts["video:install"], "npm --prefix video-renderer install");
+  assert.equal(packageJson.scripts["video:browser"], "npm --prefix video-renderer run browser:ensure");
   assert.match(launcher, /bridge\/server\.mjs/);
   assert.match(launcher, /\["run", "dev"\]/);
   assert.match(launcher, /SIGINT/);
@@ -22,6 +24,10 @@ test("local distribution exposes a single startup command and first-run document
   assert.match(readme, /codex login/);
   assert.match(readme, /npm run doctor/);
   assert.match(readme, /npm run dev:local/);
+  assert.match(readme, /npm run video:install/);
+  assert.match(readme, /npm run video:browser/);
+  assert.match(readme, /FFmpeg/);
+  assert.match(readme, /Remotion 官方页面/);
 });
 
 test("CI uses Fake Runner tests and real Codex smoke tests require explicit confirmation", async () => {
@@ -32,11 +38,13 @@ test("CI uses Fake Runner tests and real Codex smoke tests require explicit conf
   ]);
 
   assert.equal(packageJson.scripts["test:ci"], "npm run check:privacy && npm run lint && npm test");
+  assert.equal(packageJson.scripts.test, "npm run build && node --test tests/*.test.mjs tests/bridge/*.test.mjs");
   assert.equal(packageJson.scripts["smoke:codex"], "node scripts/smoke-codex-local.mjs");
   assert.match(workflow, /npm run test:ci/);
   assert.match(workflow, /actions\/checkout@v7/);
   assert.match(workflow, /actions\/setup-node@v7/);
   assert.doesNotMatch(workflow, /smoke:codex|test:codex/);
+  assert.doesNotMatch(workflow, /smoke:video|test:video:render/);
 
   const help = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });
   assert.equal(help.status, 0);
@@ -45,6 +53,13 @@ test("CI uses Fake Runner tests and real Codex smoke tests require explicit conf
   const unconfirmed = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "content"], { cwd: projectRoot, encoding: "utf8" });
   assert.equal(unconfirmed.status, 2);
   assert.match(unconfirmed.stderr, /尚未执行/);
+
+  const videoHelp = spawnSync(process.execPath, ["scripts/smoke-video-render.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(videoHelp.status, 0);
+  assert.match(videoHelp.stdout, /必须显式添加 --yes/);
+  const videoUnconfirmed = spawnSync(process.execPath, ["scripts/smoke-video-render.mjs", "render"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(videoUnconfirmed.status, 2);
+  assert.match(videoUnconfirmed.stderr, /尚未执行/);
 });
 
 test("privacy scan rejects tracked local data, user paths, and credential-shaped values", async () => {

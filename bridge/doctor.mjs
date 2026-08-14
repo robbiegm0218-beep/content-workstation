@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, rmdir } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rmdir } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -45,11 +46,70 @@ async function canListen(host, port) {
   });
 }
 
+async function findExecutable(root, acceptedNames) {
+  const queue = [root];
+  while (queue.length) {
+    const directory = queue.shift();
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) queue.push(fullPath);
+      if (entry.isFile() && acceptedNames.has(entry.name)) {
+        try {
+          await access(fullPath, fsConstants.X_OK);
+          return fullPath;
+        } catch {}
+      }
+    }
+  }
+  return null;
+}
+
+export async function probeRemotionEnvironment(config) {
+  const packageNames = ["remotion", "@remotion/player", "@remotion/cli", "@remotion/renderer", "@remotion/transitions"];
+  const packages = {};
+  for (const packageName of packageNames) {
+    const relative = `${packageName}/package.json`;
+    const candidates = [
+      path.join(config.projectRoot, "node_modules", relative),
+      path.join(config.projectRoot, "video-renderer/node_modules", relative)
+    ];
+    for (const candidate of candidates) {
+      try {
+        packages[packageName] = JSON.parse(await readFile(candidate, "utf8")).version;
+        break;
+      } catch {}
+    }
+  }
+  const versions = Object.values(packages);
+  const browserPath = await findExecutable(
+    path.join(config.projectRoot, "node_modules/.remotion"),
+    new Set(["chrome-headless-shell", "Google Chrome for Testing"])
+  ) ?? await findExecutable(
+    path.join(config.projectRoot, "video-renderer/node_modules/.remotion"),
+    new Set(["chrome-headless-shell", "Google Chrome for Testing"])
+  );
+  return {
+    packages,
+    packagesInstalled: packageNames.every((name) => Boolean(packages[name])),
+    aligned: versions.length === packageNames.length && new Set(versions).size === 1,
+    version: versions.length && new Set(versions).size === 1 ? versions[0] : null,
+    browserAvailable: Boolean(browserPath),
+    browserPath
+  };
+}
+
 export async function runDoctor(config, {
   bridgeIsListening = false,
   webIsListening = false,
   commandRunner = commandResult,
-  portProbe = canListen
+  portProbe = canListen,
+  remotionProbe = probeRemotionEnvironment
 } = {}) {
   const checks = [];
   const add = (id, status, message, fix = null, details = null) => {
@@ -131,6 +191,42 @@ export async function runDoctor(config, {
     chromeAvailable || sips.ok ? "pass" : "fail",
     chromeAvailable ? "Google Chrome renderer is available" : sips.ok ? "sips renderer is available" : "No supported local renderer found",
     chromeAvailable || sips.ok ? null : "Install Google Chrome or configure a supported renderer"
+  );
+
+  const remotion = await remotionProbe(config);
+  const remotionReady = remotion.packagesInstalled && remotion.aligned;
+  add(
+    "remotion",
+    remotionReady ? "pass" : "warn",
+    remotionReady
+      ? `Remotion ${remotion.version} packages are installed and aligned`
+      : remotion.packagesInstalled
+        ? "Remotion package versions are not aligned"
+        : "Remotion video packages are not fully installed",
+    remotionReady ? null : "Run: npm run video:install",
+    { version: remotion.version, packages: remotion.packages }
+  );
+  add(
+    "remotion-browser",
+    remotion.browserAvailable ? "pass" : "warn",
+    remotion.browserAvailable ? "Remotion Headless Chrome is ready" : "Remotion Headless Chrome has not been prepared",
+    remotion.browserAvailable ? null : "Run: npm run video:browser",
+    remotion.browserAvailable ? { available: true } : { available: false }
+  );
+
+  const [ffmpeg, ffprobe] = await Promise.all([
+    commandRunner("ffmpeg", ["-version"]),
+    commandRunner("ffprobe", ["-version"])
+  ]);
+  const mediaToolsReady = ffmpeg.ok && ffprobe.ok;
+  add(
+    "video-tools",
+    mediaToolsReady ? "pass" : "warn",
+    mediaToolsReady
+      ? `${ffmpeg.stdout.split(/\r?\n/)[0]}; ${ffprobe.stdout.split(/\r?\n/)[0]}`
+      : "FFmpeg or FFprobe is unavailable; dynamic video cannot be merged and verified",
+    mediaToolsReady ? null : "Install FFmpeg, then run npm run doctor again",
+    { ffmpeg: ffmpeg.ok, ffprobe: ffprobe.ok }
   );
 
   const webPort = webIsListening ? { available: true, errorCode: null } : await portProbe("127.0.0.1", 3000);
