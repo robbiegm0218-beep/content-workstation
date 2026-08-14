@@ -42,7 +42,7 @@ git clone https://github.com/robbiegm0218-beep/content-workstation.git
 cd content-workstation
 ```
 
-进入项目目录后执行：
+进入项目目录后，在**终端**中依次执行：
 
 ```bash
 npm install
@@ -58,14 +58,46 @@ npm run dev:local
 
 其他用户使用的是自己的 Codex 账号、额度和本机数据，不会关联仓库作者的账号，也不需要在工作站填写 OpenAI 或 DeepSeek API Key。完整链路如下：
 
-1. 安装 Git 和 Node.js `22.13.0` 或更高版本。
-2. 克隆仓库并进入项目目录。
-3. 执行 `npm install` 安装内容工作站依赖。
-4. 全局安装 Codex CLI，运行 `codex login`，在浏览器中登录自己的 ChatGPT/Codex 账号。
-5. 运行 `npm run doctor`，根据结果修复 Codex、Skill、工作目录或端口问题。
-6. 运行 `npm run dev:local`，同时启动网页和本机 Bridge。
-7. 打开 `http://localhost:3000/`，在首次使用向导中填写自己的身份、经历、目标受众、表达风格和内容目标。
-8. 在设置页“Codex 连接中心”点击重新检测。显示“连接正常”或“可用，有提醒”后即可开始生产内容。
+1. **操作位置：系统浏览器。**下载安装 Git 和 Node.js `22.13.0` 或更高版本。已经安装的用户可以跳过。
+2. **操作位置：电脑终端。**打开 macOS 的“终端”或 Windows 的 PowerShell，后续安装、登录和启动命令都在这里运行。
+3. **操作位置：电脑终端。**克隆仓库并进入项目目录：
+
+   ```bash
+   git clone https://github.com/robbiegm0218-beep/content-workstation.git
+   cd content-workstation
+   ```
+
+4. **操作位置：电脑终端。**安装工作站依赖：
+
+   ```bash
+   npm install
+   ```
+
+5. **操作位置：电脑终端，然后切换到系统浏览器。**安装 Codex CLI 并发起登录：
+
+   ```bash
+   npm install --global @openai/codex
+   codex login
+   ```
+
+   `codex login` 会自动打开系统浏览器。请在浏览器中登录你自己的 ChatGPT/Codex 账号，完成后回到终端。
+
+6. **操作位置：电脑终端。**检查 Codex 登录、仓库 Skill、工作目录和本地端口：
+
+   ```bash
+   npm run doctor
+   ```
+
+   如果出现失败项，按照终端给出的“处理方式”修复后，再运行一次该命令。
+
+7. **操作位置：电脑终端。**启动内容工作站。这个终端窗口需要保持打开：
+
+   ```bash
+   npm run dev:local
+   ```
+
+8. **操作位置：系统浏览器。**访问 `http://localhost:3000/`，在首次使用向导中填写自己的身份、经历、目标受众、表达风格和内容目标。
+9. **操作位置：内容工作站网页。**进入“设置”→“Codex 连接中心”，点击“重新检测连接”。显示“连接正常”或“可用，有提醒”后，即可进入“新建内容”开始生产。
 
 首次设置完成后，工作站可以直接调用用户本机已登录的 Codex，完成：
 
@@ -78,7 +110,7 @@ npm run dev:local
 
 内容、账号资料、任务记录和生成文件默认只保存在当前用户的电脑中。当前版本没有云端同步、多人账号共享或自动发布功能。
 
-如果需要生成 Remotion 动态视频，再执行：
+如果需要生成 Remotion 动态视频，请回到**电脑终端**，在项目目录中执行：
 
 ```bash
 npm run video:install
@@ -90,11 +122,13 @@ npm run doctor
 
 ### 以后启动
 
+打开**电脑终端**，进入 `content-workstation` 项目目录后运行：
+
 ```bash
 npm run dev:local
 ```
 
-这一条命令会同时启动网页和本机 Codex Bridge。按 `Ctrl+C` 会一起停止两个服务，不需要分别维护两个终端。
+这一条命令会同时启动网页和本机 Codex Bridge。终端窗口需要在使用期间保持打开；完成使用后，在终端按 `Ctrl+C` 会一起停止两个服务。
 
 如果首次检查未通过：
 
