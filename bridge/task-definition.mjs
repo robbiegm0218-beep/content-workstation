@@ -1,16 +1,38 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { validateArtifactManifest } from "./artifact-validator.mjs";
+import {
+  attachManifestSkillEvidence,
+  attachStructuredSkillEvidence,
+  persistJson
+} from "./skill-adapter.mjs";
 import { normalizeGeneratedVideoPlanMaterials, validateVideoPlanSemantics } from "./video-plan-validator.mjs";
+
+export const TASK_SKILL_ROUTES = Object.freeze({
+  research: "create-creator-content",
+  angles: "create-creator-content",
+  content: "create-creator-content",
+  publishing: "create-creator-content",
+  html: "produce-creator-visuals",
+  cover: "produce-creator-visuals",
+  "video-plan": "plan-creator-video"
+});
+
+export function resolveTaskSkill(taskType) {
+  const skillName = TASK_SKILL_ROUTES[taskType];
+  if (!skillName) throw new Error(`No creator plugin Skill route for task type: ${taskType}`);
+  return skillName;
+}
 
 export function createTaskSpecification(input, workspace, timeoutMs) {
   const taskPath = path.join(workspace, "input/task.json");
 
   if (input.taskType === "research") {
+    const skillName = resolveTaskSkill(input.taskType);
     return {
       prompt: [
-        "请使用 $content-workstation-creator Skill 执行联网选题调研。",
+        `请使用 $${skillName} Skill 执行联网选题调研。`,
         `账号资料：${path.join(workspace, "input/creator-context.json")}`,
         `议题简报：${path.join(workspace, "input/content-brief.json")}`,
         `任务补充要求：${taskPath}`,
@@ -28,9 +50,10 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
   }
 
   if (input.taskType === "angles") {
+    const skillName = resolveTaskSkill(input.taskType);
     return {
       prompt: [
-        "请使用 $content-workstation-creator Skill 生成选题切入角度。",
+        `请使用 $${skillName} Skill 生成选题切入角度。`,
         `账号资料：${path.join(workspace, "input/creator-context.json")}`,
         `议题简报：${path.join(workspace, "input/content-brief.json")}`,
         `任务补充要求：${taskPath}`,
@@ -46,9 +69,10 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
   }
 
   if (input.taskType === "content") {
+    const skillName = resolveTaskSkill(input.taskType);
     return {
       prompt: [
-        "请使用 $content-workstation-creator Skill 生成结构化内容稿。",
+        `请使用 $${skillName} Skill 生成结构化内容稿。`,
         `账号资料：${path.join(workspace, "input/creator-context.json")}`,
         `选题简报：${path.join(workspace, "input/content-brief.json")}`,
         `任务补充要求：${taskPath}`,
@@ -63,6 +87,7 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
   }
 
   if (input.taskType === "video-plan") {
+    const skillName = resolveTaskSkill(input.taskType);
     const usesHtml = input.styleConfig?.sourceMode === "accepted-html";
     const aspectRatio = input.styleConfig?.aspectRatio === "9:16" ? "9:16" : "16:9";
     const dimensions = aspectRatio === "9:16" ? "1080×1920" : "1920×1080";
@@ -71,7 +96,7 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
     const sceneCountGuidance = durationInFrames === 14400 ? "建议 40～90 个场景" : durationInFrames === 9000 ? "建议 25～60 个场景" : "建议 4～12 个场景";
     return {
       prompt: [
-        "请使用 $content-workstation-creator Skill 执行 video-plan 场景方案任务。",
+        `请使用 $${skillName} Skill 执行 video-plan 场景方案任务。`,
         `已确认内容：${path.join(workspace, "input/confirmed-content.md")}`,
         `视频配置：${path.join(workspace, "input/style-config.json")}`,
         usesHtml ? `已验收 HTML 快照：${path.join(workspace, "input/accepted-presentation.html")}` : "本次直接根据内容稿规划，不读取 HTML。",
@@ -90,9 +115,10 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
   }
 
   if (input.taskType === "publishing") {
+    const skillName = resolveTaskSkill(input.taskType);
     return {
       prompt: [
-        "请使用 $content-workstation-creator Skill 执行 publishing 发布包任务。",
+        `请使用 $${skillName} Skill 执行 publishing 发布包任务。`,
         `已确认内容：${path.join(workspace, "input/confirmed-content.md")}`,
         `平台与已接受产物配置：${path.join(workspace, "input/style-config.json")}`,
         `任务补充要求：${taskPath}`,
@@ -112,16 +138,20 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
     "请同时使用 $imagegen；优先生成无字视觉素材，再进行本地精确排版。",
     "如果图片能力不可用，按 Skill 规定自动使用模板渲染并如实记录 generationMode。"
   ] : [];
+  const skillName = resolveTaskSkill(input.taskType);
 
   return {
     prompt: [
-      `请使用 $content-workstation-creator Skill 执行 ${input.taskType} 视觉制作任务。`,
+      `请使用 $${skillName} Skill 执行 ${input.taskType} 视觉制作任务。`,
       ...coverInstructions,
       `已确认内容：${path.join(workspace, "input/confirmed-content.md")}`,
       `风格配置：${path.join(workspace, "input/style-config.json")}`,
       `任务补充要求：${taskPath}`,
       `输出目录：${path.join(workspace, "output")}`,
-      input.taskType === "html" ? "只生成录屏 HTML 和 manifest，不生成封面。" : "只生成三尺寸封面和 manifest，不生成录屏 HTML。",
+      input.taskType === "html"
+        ? "只生成 output/presentation.html 和 output/manifest.json，不生成封面；HTML 根节点必须包含 data-content-workstation=\"recording-page-v1\"，且不能引用远程 src 或 href。"
+        : "只生成 output/cover-16x9.png（1600×900）、output/cover-4x3.png（1200×900）、output/cover-3x4.png（900×1200）和 output/manifest.json，不生成录屏 HTML。",
+      "manifest 必须严格遵守调用方 Schema，文件路径、MIME、尺寸和 SHA-256 必须与实际产物一致；不要添加 Schema 未声明的内部 evidence 字段。",
       "最终只返回与 output/manifest.json 完全相同、且符合指定 Schema 的 JSON。"
     ].join("\n"),
     sandbox: "workspace-write",
@@ -133,19 +163,17 @@ export function createTaskSpecification(input, workspace, timeoutMs) {
 
 export async function finalizeTaskResult(input, workspace, structuredResult) {
   if (input.taskType === "research" || input.taskType === "angles" || input.taskType === "content" || input.taskType === "video-plan") {
-    if (structuredResult.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
-      throw new Error(`${input.taskType} result is missing repository Skill evidence`);
-    }
+    structuredResult = attachStructuredSkillEvidence(structuredResult, resolveTaskSkill(input.taskType));
     const isResearch = input.taskType === "research";
     const isAngles = input.taskType === "angles";
     const isVideoPlan = input.taskType === "video-plan";
     if (isVideoPlan) {
       structuredResult = normalizeGeneratedVideoPlanMaterials(structuredResult);
       validateVideoPlanSemantics(structuredResult, input.styleConfig);
-      await writeFile(path.join(workspace, "output/video-scene-plan.json"), `${JSON.stringify(structuredResult, null, 2)}\n`, { mode: 0o600 });
     }
     const relativePath = isResearch ? "output/topic-research.json" : isAngles ? "output/topic-angles.json" : isVideoPlan ? "output/video-scene-plan.json" : "output/content-result.json";
     const artifactPath = path.join(workspace, relativePath);
+    await persistJson(artifactPath, structuredResult);
     const buffer = await readFile(artifactPath);
     return {
       manifestVersion: "1.0",
@@ -168,7 +196,9 @@ export async function finalizeTaskResult(input, workspace, structuredResult) {
   if (JSON.stringify(diskManifest) !== JSON.stringify(structuredResult)) {
     throw new Error("Returned manifest does not match output/manifest.json");
   }
-  return validateArtifactManifest(workspace, diskManifest, input.taskType, {
+  const adaptedManifest = attachManifestSkillEvidence(diskManifest);
+  await persistJson(path.join(workspace, "output/manifest.json"), adaptedManifest);
+  return validateArtifactManifest(workspace, adaptedManifest, input.taskType, {
     platforms: input.taskType === "publishing" ? input.styleConfig?.platforms : undefined
   });
 }

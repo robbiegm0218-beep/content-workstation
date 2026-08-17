@@ -2,7 +2,7 @@
 
 > 制定日期：2026-08-17
 >
-> 当前阶段：M2 公开化改造已完成，下一步执行 M3 工作站兼容迁移
+> 当前阶段：M3 工作站兼容迁移已完成，下一步执行 M4 测试与质量闸门
 >
 > 状态说明：`[x] 已完成`、`[~] 进行中`、`[ ] 待开始`、`[!] 外部依赖`
 
@@ -86,10 +86,8 @@ self-media-studio/
 │               ├── agents/openai.yaml
 │               └── references/
 ├── .agents/
-│   ├── plugins/
-│   │   └── marketplace.json
-│   └── skills/
-│       └── content-workstation-creator/  # 迁移完成前保留
+│   └── plugins/
+│       └── marketplace.json
 └── tests/
     └── plugin/
         ├── fixtures/
@@ -195,14 +193,27 @@ M2 验证记录（2026-08-17）：
 
 | 编号 | 状态 | 任务 | 修改位置 | 验收标准 |
 |---|---|---|---|---|
-| P18 | [ ] | 建立工作站任务到三个 Skills 的路由映射 | `bridge/task-definition.mjs` | content/angles/publishing/html/cover/video-plan 路由正确 |
-| P19 | [ ] | 调整隔离工作区复制逻辑 | `bridge/workspace-manager.mjs` | 只复制任务需要的插件 Skill 和输入文件 |
-| P20 | [ ] | 将内部 evidence 移到适配层 | Bridge、schemas、validators | 前端状态判断不再依赖 Skill 文案主动写固定标记 |
-| P21 | [ ] | 迁移现有冒烟测试 | `scripts/smoke-codex-*.mjs`、`tests/bridge/` | 旧任务类型全部通过新 Skills 生成 |
-| P22 | [ ] | 移除旧仓库 Skill | `.agents/skills/content-workstation-creator` | 仅在新链路全量通过后删除；Git 历史可回退 |
-| P23 | [ ] | 更新 Doctor 和 README | `bridge/doctor.mjs`、`README.md` | 诊断插件安装状态，安装步骤明确到终端和设置页 |
+| P18 | [x] | 建立工作站任务到三个 Skills 的路由映射 | `bridge/task-definition.mjs` | content/angles/publishing/html/cover/video-plan 路由正确 |
+| P19 | [x] | 调整隔离工作区复制逻辑 | `bridge/workspace-manager.mjs` | 只复制任务需要的插件 Skill 和输入文件 |
+| P20 | [x] | 将内部 evidence 移到适配层 | Bridge、schemas、validators | 前端状态判断不再依赖 Skill 文案主动写固定标记 |
+| P21 | [x] | 迁移现有冒烟测试 | `scripts/smoke-codex-*.mjs`、`tests/bridge/` | 旧任务类型全部通过新 Skills 生成 |
+| P22 | [x] | 移除旧仓库 Skill | `.agents/skills/content-workstation-creator` | 仅在新链路全量通过后删除；Git 历史可回退 |
+| P23 | [x] | 更新 Doctor 和 README | `bridge/doctor.mjs`、`README.md` | 诊断插件安装状态，安装步骤明确到终端和设置页 |
 
 M3 闸门：内容工作站完整链路、真实 Codex 冒烟、HTML、封面、发布包、视频方案和续跑修改全部通过；没有两套同义规则。
+
+M3 验证记录（2026-08-17）：
+
+- `research`、`angles`、`content`、`publishing` 路由到 `create-creator-content`；`html`、`cover` 路由到 `produce-creator-visuals`；`video-plan` 路由到 `plan-creator-video`。
+- 隔离工作区只复制当前任务需要的一个 Skill 和一个 Schema；`video-render` 不复制 Codex Skill。
+- 公共 Schema 不再要求 `CW-SKILL-1.0`。Bridge 适配器在验证并落盘前注入 `CW-BRIDGE-1.0`，工作站内部结果保持可追踪。
+- 旧 `.agents/skills/content-workstation-creator` 已在第一轮 54/54 回归通过后删除；代码和运行时不再维护第二套同义规则。
+- 真实 Codex 内容任务通过：加载 `create-creator-content`，生成 3 个副标题候选和 8 段时间轴。
+- 真实 HTML 任务通过：生成单文件 HTML，磁盘 manifest、根节点标记、远程资源限制和 SHA-256 校验通过。
+- 真实封面任务通过：使用 `codex-imagegen-hybrid` 生成 1600×900、1200×900、900×1200 三张独立 PNG，尺寸与 SHA-256 校验通过。
+- 真实 Bridge 内容生成和同线程续跑通过：两次运行使用同一 thread，适配层 evidence 为 `CW-BRIDGE-1.0`。
+- 发布包和视频方案通过路由、Schema、单平台约束、场景语义和 Bridge 固定测试；追加真实发布包调用因本机 Codex 当期额度上限未启动，未将其伪装为真实调用成功。
+- Doctor 可区分插件源码与 Codex 安装状态；README 和首次使用向导给出终端、浏览器和设置页的明确操作位置。
 
 ### M4：测试与质量闸门
 
@@ -319,4 +330,4 @@ npm test
 
 ## 10. 下一步
 
-下一批次执行 M3 的 P18～P23：在保留回退路径的前提下，让内容工作站任务按类型调用三个插件 Skills，把内部 evidence 移到适配层，并完成旧链路全量回归。只有新链路稳定后才删除旧 Skill。
+下一批次执行 M4 的 P24～P29：把正向、负向和边界案例固化为插件测试数据，补齐统一 `test:plugin` 入口，并完成公开插件的质量与隐私闸门。

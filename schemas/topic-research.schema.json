@@ -8,10 +8,9 @@
       "additionalProperties": false,
       "properties": {
         "skillName": { "type": "string" },
-        "skillEvidence": { "type": "string" },
         "researchUsed": { "type": "boolean" }
       },
-      "required": ["skillName", "skillEvidence", "researchUsed"]
+      "required": ["skillName", "researchUsed"]
     },
     "summary": { "type": "string" },
     "platformFindings": {

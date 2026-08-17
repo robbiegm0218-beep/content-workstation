@@ -48,6 +48,8 @@ cd content-workstation
 npm install
 npm install --global @openai/codex
 codex login
+codex plugin marketplace add .
+codex plugin add creator-content-studio@personal
 npm run doctor
 npm run dev:local
 ```
@@ -82,7 +84,16 @@ npm run dev:local
 
    `codex login` 会自动打开系统浏览器。请在浏览器中登录你自己的 ChatGPT/Codex 账号，完成后回到终端。
 
-6. **操作位置：电脑终端。**检查 Codex 登录、仓库 Skill、工作目录和本地端口：
+6. **操作位置：电脑终端，且当前目录必须是仓库根目录。**关联仓库自带的创作者内容插件：
+
+   ```bash
+   codex plugin marketplace add .
+   codex plugin add creator-content-studio@personal
+   ```
+
+   第一条命令让 Codex 识别当前仓库的本地插件市场；第二条命令安装并启用 `creator-content-studio`。工作站即使未安装插件也能调用仓库内置的三个 Skills，但安装后还可以在 Codex 新任务中直接使用内容、视觉和视频规划能力。
+
+7. **操作位置：电脑终端。**检查 Codex 登录、插件源码、插件安装状态、工作目录和本地端口：
 
    ```bash
    npm run doctor
@@ -90,14 +101,14 @@ npm run dev:local
 
    如果出现失败项，按照终端给出的“处理方式”修复后，再运行一次该命令。
 
-7. **操作位置：电脑终端。**启动内容工作站。这个终端窗口需要保持打开：
+8. **操作位置：电脑终端。**启动内容工作站。这个终端窗口需要保持打开：
 
    ```bash
    npm run dev:local
    ```
 
-8. **操作位置：系统浏览器。**访问 `http://localhost:3000/`，在首次使用向导中填写自己的身份、经历、目标受众、表达风格和内容目标。
-9. **操作位置：内容工作站网页。**进入“设置”→“Codex 连接中心”，点击“重新检测连接”。显示“连接正常”或“可用，有提醒”后，即可进入“新建内容”开始生产。
+9. **操作位置：系统浏览器。**访问 `http://localhost:3000/`，在首次使用向导中填写自己的身份、经历、目标受众、表达风格和内容目标。
+10. **操作位置：内容工作站网页。**进入“设置”→“Codex 连接中心”，点击“重新检测连接”。“创作者插件源码”应显示通过；“Codex 插件关联”显示通过后，既可使用工作站链路，也可在 Codex 新任务中独立调用插件。
 
 首次设置完成后，工作站可以直接调用用户本机已登录的 Codex，完成：
 
@@ -134,6 +145,8 @@ npm run dev:local
 
 - 提示找不到 Codex：运行 `npm install --global @openai/codex`。
 - 提示未登录：运行 `codex login`，完成浏览器登录后回到设置页重新检测。
+- 提示创作者插件源码不完整：确认终端位于完整 Git 仓库，而不是只复制了网页构建产物。
+- 提示 Codex 插件未关联：在仓库根目录运行 `codex plugin marketplace add .`，再运行 `codex plugin add creator-content-studio@personal`。
 - 提示 Remotion 包缺失或版本不一致：运行 `npm run video:install`。
 - 提示视频渲染浏览器未准备：运行 `npm run video:browser`；该命令需要联网下载 Remotion 对应版本的 Headless Chrome。
 - 提示 FFmpeg 或 FFprobe 不可用：安装 FFmpeg 后重新运行 `npm run doctor`。
@@ -159,6 +172,8 @@ CI 会先运行 `npm run check:privacy`，检查所有 Git 跟踪文件是否包
 npm run smoke:codex -- content --yes
 npm run smoke:codex -- html --yes
 npm run smoke:codex -- cover --yes
+npm run smoke:codex -- publishing --yes
+npm run smoke:codex -- video-plan --yes
 # 或依次执行以上三项
 npm run smoke:codex -- full --yes
 ```

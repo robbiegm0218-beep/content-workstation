@@ -1,12 +1,14 @@
 # Three-size cover production
 
-## Required sizes
+## Sizes
 
-Compose each size independently:
+Honor dimensions supplied by the caller or structured schema. When no dimensions are supplied, use these high-resolution defaults:
 
 - 16:9 — 1920 × 1080
 - 4:3 — 1600 × 1200
 - 3:4 — 1440 × 1920
+
+Regardless of pixel dimensions, keep the three aspect ratios exact and compose each size independently.
 
 Do not obtain the vertical cover by blindly cropping the landscape cover. Preserve the same idea while adjusting subject scale, title wrapping, safe areas, and reading order.
 

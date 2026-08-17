@@ -53,8 +53,8 @@ export type VideoScenePlan = {
   scenes: Scene[];
   missingMaterials: string[];
   generationMeta: {
-    skillName: 'content-workstation-creator';
-    skillEvidence: 'CW-SKILL-1.0';
+    skillName: 'plan-creator-video';
+    skillEvidence: string;
     researchUsed: false;
   };
 };

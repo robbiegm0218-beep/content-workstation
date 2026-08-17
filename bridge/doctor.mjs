@@ -152,13 +152,37 @@ export async function runDoctor(config, {
   const loginMessage = login.stdout || login.stderr.split(/\r?\n/).filter(Boolean).at(-1) || "Codex login status is available";
   add("login", login.ok ? "pass" : "fail", login.ok ? loginMessage : "Codex is not logged in", login.ok ? null : "Run: codex login", login.ok ? null : login.stderr || null);
 
-  const skillPath = path.join(config.projectRoot, ".agents/skills/content-workstation-creator/SKILL.md");
+  const pluginPath = path.join(config.projectRoot, "plugins/creator-content-studio");
+  const requiredPluginFiles = [
+    ".codex-plugin/plugin.json",
+    "skills/create-creator-content/SKILL.md",
+    "skills/produce-creator-visuals/SKILL.md",
+    "skills/plan-creator-video/SKILL.md"
+  ];
   try {
-    await access(skillPath);
-    add("skill", "pass", "Repository Skill is available", null, skillPath);
+    await Promise.all(requiredPluginFiles.map((relativePath) => access(path.join(pluginPath, relativePath))));
+    add("skill", "pass", "Creator Content Studio plugin source is available", null, pluginPath);
   } catch {
-    add("skill", "fail", "Repository Skill is missing", "Restore .agents/skills/content-workstation-creator");
+    add("skill", "fail", "Creator Content Studio plugin source is incomplete", "Restore plugins/creator-content-studio from Git");
   }
+
+  const pluginList = codexVersion.ok ? await commandRunner("codex", ["plugin", "list", "--json"]) : { ok: false, stderr: "Codex unavailable" };
+  let installedPlugin = null;
+  if (pluginList.ok) {
+    try {
+      const parsed = JSON.parse(pluginList.stdout);
+      installedPlugin = parsed.installed?.find((plugin) => plugin.name === "creator-content-studio") ?? null;
+    } catch {}
+  }
+  add(
+    "plugin-installation",
+    installedPlugin?.installed && installedPlugin?.enabled ? "pass" : "warn",
+    installedPlugin?.installed && installedPlugin?.enabled
+      ? `Creator Content Studio ${installedPlugin.version || ""} is installed and enabled`.trim()
+      : "Creator Content Studio is not installed in Codex; Workstation can still use the bundled Skills",
+    installedPlugin?.installed && installedPlugin?.enabled ? null : "From the repository root, run: codex plugin marketplace add . && codex plugin add creator-content-studio@personal",
+    installedPlugin ? { pluginId: installedPlugin.pluginId, version: installedPlugin.version, enabled: installedPlugin.enabled } : null
+  );
 
   const probeDirectory = path.join(config.workRoot, `.doctor-${randomUUID()}`);
   try {

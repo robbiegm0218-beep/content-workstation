@@ -27,5 +27,5 @@
     {"id": "scene-summary", "type": "summary", "startFrame": 750, "durationInFrames": 150, "eyebrow": "行动总结", "headline": "先把质量关卡画出来，再决定后台做什么", "body": "这会比从接口清单出发，更接近一个真正能上线、能迭代的 RAG 产品。", "emphasis": ["质量关卡"], "items": [], "narration": "先把链路和质量门槛画清楚，再讨论具体模型和参数。", "transition": "fade", "showCaptions": true, "materialIds": []}
   ],
   "missingMaterials": [],
-  "generationMeta": {"skillName": "content-workstation-creator", "skillEvidence": "CW-SKILL-1.0", "researchUsed": false}
+  "generationMeta": {"skillName": "plan-creator-video", "skillEvidence": "CW-BRIDGE-1.0", "researchUsed": false}
 }

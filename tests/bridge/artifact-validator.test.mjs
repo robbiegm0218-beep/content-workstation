@@ -5,11 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { validateArtifactManifest } from "../../bridge/artifact-validator.mjs";
+import { BRIDGE_SKILL_EVIDENCE } from "../../bridge/skill-adapter.mjs";
 
 function createHtmlManifest(html, artifactPath = "output/presentation.html") {
   return {
     manifestVersion: "1.0",
-    skillEvidence: "CW-SKILL-1.0",
+    skillEvidence: BRIDGE_SKILL_EVIDENCE,
     taskType: "html",
     generationMode: "codex-html",
     artifacts: [{
@@ -55,7 +56,7 @@ test("artifact validator accepts a complete four-platform publishing package", a
   await writeFile(path.join(output, "publishing-package.md"), markdown);
   const manifest = {
     manifestVersion: "1.0",
-    skillEvidence: "CW-SKILL-1.0",
+    skillEvidence: BRIDGE_SKILL_EVIDENCE,
     taskType: "publishing",
     generationMode: "codex-publishing",
     artifacts: [{
@@ -81,7 +82,7 @@ test("artifact validator accepts a publishing package for only the selected plat
   await writeFile(path.join(output, "publishing-package.md"), markdown);
   const manifest = {
     manifestVersion: "1.0",
-    skillEvidence: "CW-SKILL-1.0",
+    skillEvidence: BRIDGE_SKILL_EVIDENCE,
     taskType: "publishing",
     generationMode: "codex-publishing",
     artifacts: [{

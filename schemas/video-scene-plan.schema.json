@@ -77,11 +77,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "skillName": {"type": "string", "const": "content-workstation-creator"},
-        "skillEvidence": {"type": "string", "const": "CW-SKILL-1.0"},
+        "skillName": {"type": "string", "const": "plan-creator-video"},
         "researchUsed": {"type": "boolean", "const": false}
       },
-      "required": ["skillName", "skillEvidence", "researchUsed"]
+      "required": ["skillName", "researchUsed"]
     }
   },
   "required": ["schemaVersion", "title", "subtitle", "sourceMode", "aspectRatio", "fps", "width", "height", "durationInFrames", "sourceTrace", "theme", "materials", "scenes", "missingMaterials", "generationMeta"]

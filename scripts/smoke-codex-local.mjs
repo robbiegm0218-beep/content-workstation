@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
-const supportedScopes = new Set(["content", "html", "cover", "bridge", "cancel", "full"]);
+const supportedScopes = new Set(["content", "html", "cover", "publishing", "video-plan", "bridge", "cancel", "full"]);
 const args = process.argv.slice(2);
 const helpRequested = args.includes("--help") || args.includes("-h");
 const confirmed = args.includes("--yes");
@@ -19,6 +19,8 @@ function printUsage() {
   content  验证仓库 Skill 与结构化内容稿（默认）
   html     验证单文件 HTML 生成与产物校验
   cover    验证三尺寸封面；可能调用图片生成，耗时最长
+  publishing 验证只生成已选平台发布包
+  video-plan 验证 30 秒结构化视频场景方案，不渲染 MP4
   bridge   验证 Bridge 内容生成与同一线程续跑
   cancel   验证真实 Codex 进程取消后无残留
   full     依次验证 content、html、cover
@@ -63,6 +65,8 @@ const tasks = {
   content: [["scripts/smoke-codex-content.mjs"]],
   html: [["scripts/smoke-codex-artifacts.mjs", "html"]],
   cover: [["scripts/smoke-codex-artifacts.mjs", "cover"]],
+  publishing: [["scripts/smoke-codex-workstation-tasks.mjs", "publishing"]],
+  "video-plan": [["scripts/smoke-codex-workstation-tasks.mjs", "video-plan"]],
   bridge: [["scripts/smoke-bridge-content.mjs"]],
   cancel: [["scripts/smoke-codex-cancel.mjs"]],
   full: [
@@ -87,4 +91,3 @@ for (const [script, ...scriptArgs] of tasks[scope]) {
 }
 
 process.stdout.write(`\n真实 Codex 冒烟测试通过：${scope}\n`);
-

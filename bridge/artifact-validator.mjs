@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { BRIDGE_SKILL_EVIDENCE } from "./skill-adapter.mjs";
 
 const expectedCovers = new Map([
   ["cover-16x9", { path: "output/cover-16x9.png", width: 1600, height: 900 }],
@@ -36,7 +37,7 @@ async function resolveSafeArtifact(workspace, relativePath) {
 
 export async function validateArtifactManifest(workspace, manifest, expectedTaskType, options = {}) {
   assert.equal(manifest.manifestVersion, "1.0");
-  assert.equal(manifest.skillEvidence, "CW-SKILL-1.0");
+  assert.equal(manifest.skillEvidence, BRIDGE_SKILL_EVIDENCE);
   assert.equal(manifest.taskType, expectedTaskType);
 
   if (expectedTaskType === "html") {

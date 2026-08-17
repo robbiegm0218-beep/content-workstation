@@ -122,7 +122,7 @@ export type VideoScenePlan = {
   materials: string[];
   scenes: VideoScene[];
   missingMaterials: string[];
-  generationMeta: { skillName: "content-workstation-creator"; skillEvidence: "CW-SKILL-1.0"; researchUsed: false };
+  generationMeta: { skillName: "plan-creator-video"; skillEvidence: string; researchUsed: false };
 };
 
 export type LocalAsset = {

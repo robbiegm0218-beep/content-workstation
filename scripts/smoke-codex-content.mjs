@@ -7,11 +7,11 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const smokeRoot = path.join(projectRoot, "work/a0-smoke");
 await mkdir(smokeRoot, { recursive: true });
 const workspace = await mkdtemp(path.join(smokeRoot, "workspace-"));
-const skillTarget = path.join(workspace, ".agents/skills/content-workstation-creator");
+const skillTarget = path.join(workspace, ".agents/skills/create-creator-content");
 const fixturesTarget = path.join(workspace, "input");
 const schemaTarget = path.join(workspace, "schemas/content-result.schema.json");
 
-await cp(path.join(projectRoot, ".agents/skills/content-workstation-creator"), skillTarget, { recursive: true });
+await cp(path.join(projectRoot, "plugins/creator-content-studio/skills/create-creator-content"), skillTarget, { recursive: true });
 await cp(path.join(projectRoot, "tests/fixtures/a0"), fixturesTarget, { recursive: true });
 await mkdir(path.dirname(schemaTarget), { recursive: true });
 await cp(path.join(projectRoot, "schemas/content-result.schema.json"), schemaTarget);
@@ -22,7 +22,7 @@ const briefPath = path.join(fixturesTarget, "content-brief.json");
 const outputPath = path.join(workspace, "output/content-result.json");
 
 const prompt = [
-  "请使用 $content-workstation-creator Skill 完成一次结构化内容稿验证。",
+  "请使用 $create-creator-content Skill 完成一次结构化内容稿验证。",
   `账号资料：${creatorPath}`,
   `选题简报：${briefPath}`,
   "读取这两个文件并严格遵守仓库 Skill。",
@@ -43,8 +43,8 @@ const result = await runCodex({
 
 const content = result.structuredResult;
 if (!result.threadId) throw new Error("Missing thread id in Codex JSONL stream");
-if (content.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
-  throw new Error("Repository Skill evidence marker is missing");
+if (content.generationMeta?.skillName !== "create-creator-content") {
+  throw new Error("Public content Skill identity is missing");
 }
 if (content.subtitleCandidates?.length !== 3) {
   throw new Error("Expected exactly three subtitle candidates");
@@ -62,7 +62,7 @@ process.stdout.write(`${JSON.stringify({
   ok: true,
   threadId: result.threadId,
   eventCount,
-  skillEvidence: content.generationMeta.skillEvidence,
+  skillName: content.generationMeta.skillName,
   subtitleCandidates: content.subtitleCandidates.length,
   timelineItems: content.timeline.length,
   workspace,

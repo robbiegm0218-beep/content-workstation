@@ -2,8 +2,19 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { resolveTaskSkill } from "./task-definition.mjs";
 
 const execFileAsync = promisify(execFile);
+
+const TASK_SCHEMAS = Object.freeze({
+  research: ["topic-research.schema.json"],
+  angles: ["topic-angles.schema.json"],
+  content: ["content-result.schema.json"],
+  html: ["artifact-manifest.schema.json"],
+  cover: ["artifact-manifest.schema.json"],
+  publishing: ["artifact-manifest.schema.json"],
+  "video-plan": ["video-scene-plan.schema.json"]
+});
 
 export class WorkspaceManager {
   constructor(config, options = {}) {
@@ -31,35 +42,21 @@ export class WorkspaceManager {
     await mkdir(path.join(workspace, "schemas"), { recursive: true });
     await mkdir(path.join(workspace, ".runner"), { recursive: true });
 
-    await cp(
-      path.join(this.config.projectRoot, ".agents/skills/content-workstation-creator"),
-      path.join(workspace, ".agents/skills/content-workstation-creator"),
-      { recursive: true, errorOnExist: true }
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/content-result.schema.json"),
-      path.join(workspace, "schemas/content-result.schema.json")
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/topic-angles.schema.json"),
-      path.join(workspace, "schemas/topic-angles.schema.json")
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/topic-research.schema.json"),
-      path.join(workspace, "schemas/topic-research.schema.json")
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/artifact-manifest.schema.json"),
-      path.join(workspace, "schemas/artifact-manifest.schema.json")
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/video-scene-plan.schema.json"),
-      path.join(workspace, "schemas/video-scene-plan.schema.json")
-    );
-    await cp(
-      path.join(this.config.projectRoot, "schemas/video-render-manifest.schema.json"),
-      path.join(workspace, "schemas/video-render-manifest.schema.json")
-    );
+    if (input.taskType !== "video-render") {
+      const skillName = resolveTaskSkill(input.taskType);
+      await mkdir(path.join(workspace, ".agents/skills"), { recursive: true });
+      await cp(
+        path.join(this.config.projectRoot, "plugins/creator-content-studio/skills", skillName),
+        path.join(workspace, ".agents/skills", skillName),
+        { recursive: true, errorOnExist: true }
+      );
+      for (const schemaName of TASK_SCHEMAS[input.taskType] ?? []) {
+        await cp(
+          path.join(this.config.projectRoot, "schemas", schemaName),
+          path.join(workspace, "schemas", schemaName)
+        );
+      }
+    }
 
     const taskSnapshot = {
       runId,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -100,4 +100,31 @@ test("Doctor reports a complete Remotion rendering environment", async () => {
   assert.equal(checkById(report, "remotion-browser").status, "pass");
   assert.equal(checkById(report, "video-tools").status, "pass");
   assert.match(checkById(report, "video-tools").message, /ffmpeg version 8\.0/);
+});
+
+test("Doctor reports the bundled plugin source and Codex installation state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "content-workstation-doctor-plugin-"));
+  for (const relativePath of [
+    ".codex-plugin/plugin.json",
+    "skills/create-creator-content/SKILL.md",
+    "skills/produce-creator-visuals/SKILL.md",
+    "skills/plan-creator-video/SKILL.md"
+  ]) {
+    const target = path.join(root, "plugins/creator-content-studio", relativePath);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, "test");
+  }
+  const config = createBridgeConfig({ projectRoot: root, dataRoot: path.join(root, ".data"), workRoot: path.join(root, "work"), port: 4317 });
+  const commandRunner = async (command, args) => {
+    if (command === "codex" && args[0] === "--version") return { ok: true, stdout: "codex-cli 0.200.0", stderr: "" };
+    if (command === "codex" && args[0] === "login") return { ok: true, stdout: "Logged in using ChatGPT", stderr: "" };
+    if (command === "codex" && args[0] === "plugin") return { ok: true, stdout: JSON.stringify({ installed: [{ pluginId: "creator-content-studio@personal", name: "creator-content-studio", version: "0.1.0", installed: true, enabled: true }] }), stderr: "" };
+    if (command === "codex" && args[0] === "features") return { ok: true, stdout: "image_generation stable false", stderr: "" };
+    return { ok: false, stdout: "", stderr: "missing" };
+  };
+  const report = await runDoctor(config, { commandRunner, portProbe: async () => ({ available: true, errorCode: null }) });
+
+  assert.equal(checkById(report, "skill").status, "pass");
+  assert.equal(checkById(report, "plugin-installation").status, "pass");
+  assert.equal(checkById(report, "plugin-installation").details.pluginId, "creator-content-studio@personal");
 });

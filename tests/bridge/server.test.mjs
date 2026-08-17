@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createBridgeRuntime } from "../../bridge/server.mjs";
+import { BRIDGE_SKILL_EVIDENCE } from "../../bridge/skill-adapter.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "../..");
 const token = "local-test-token-0123456789";
@@ -17,8 +18,7 @@ async function fakeRunner(options) {
   options.onEvent?.({ type: "turn.started" });
   const result = options.outputPath.endsWith("topic-research.json") ? {
     generationMeta: {
-      skillName: "content-workstation-creator",
-      skillEvidence: "CW-SKILL-1.0",
+      skillName: "create-creator-content",
       researchUsed: true
     },
     summary: "多数内容讲概念，缺少实际决策顺序。",
@@ -47,8 +47,7 @@ async function fakeRunner(options) {
     limitations: ["测试环境未访问真实平台"]
   } : options.outputPath.endsWith("topic-angles.json") ? {
     generationMeta: {
-      skillName: "content-workstation-creator",
-      skillEvidence: "CW-SKILL-1.0",
+      skillName: "create-creator-content",
       researchUsed: false
     },
     angles: [
@@ -58,8 +57,7 @@ async function fakeRunner(options) {
     ]
   } : {
     generationMeta: {
-      skillName: "content-workstation-creator",
-      skillEvidence: "CW-SKILL-1.0",
+      skillName: "create-creator-content",
       researchUsed: false
     }
   };
@@ -223,7 +221,7 @@ test("Bridge enforces loopback, Origin, token, task whitelist, persistence and a
   assert.ok(internalRun.workspace.startsWith(path.join(root, "work")));
   await Promise.all([
     access(path.join(internalRun.workspace, ".git")),
-    access(path.join(internalRun.workspace, ".agents/skills/content-workstation-creator/SKILL.md")),
+    access(path.join(internalRun.workspace, ".agents/skills/create-creator-content/SKILL.md")),
     access(path.join(internalRun.workspace, "input/task.json")),
     access(path.join(internalRun.workspace, "input/creator-context.json")),
     access(path.join(internalRun.workspace, "input/content-brief.json")),
@@ -247,7 +245,7 @@ test("Bridge enforces loopback, Origin, token, task whitelist, persistence and a
     headers: { Authorization: `Bearer ${token}` }
   });
   assert.equal(artifactResponse.status, 200);
-  assert.equal((await artifactResponse.json()).generationMeta.skillEvidence, "CW-SKILL-1.0");
+  assert.equal((await artifactResponse.json()).generationMeta.skillEvidence, BRIDGE_SKILL_EVIDENCE);
 
   const anglesCreated = await jsonRequest(baseUrl, "/v1/runs", {
     method: "POST",

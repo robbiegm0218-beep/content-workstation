@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { createBridgeRuntime } from "../bridge/server.mjs";
+import { BRIDGE_SKILL_EVIDENCE } from "../bridge/skill-adapter.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const smokeRoot = path.join(projectRoot, "work/a2-bridge-smoke");
@@ -56,8 +57,8 @@ try {
 
   const contentResponse = await fetch(`${baseUrl}/v1/artifacts/${runId}/file/content-result`, { headers });
   const content = await contentResponse.json();
-  if (content.generationMeta?.skillEvidence !== "CW-SKILL-1.0") {
-    throw new Error("Bridge result is missing repository Skill evidence");
+  if (content.generationMeta?.skillEvidence !== BRIDGE_SKILL_EVIDENCE) {
+    throw new Error("Bridge result is missing adapter evidence");
   }
   const eventsResponse = await fetch(`${baseUrl}/v1/runs/${runId}/events`, { headers });
   const events = await eventsResponse.text();

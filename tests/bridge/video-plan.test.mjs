@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -26,12 +26,15 @@ test("video-plan workspace snapshots accepted HTML and uses the scene schema", a
     acceptedHtml: "<!doctype html><html><body><h1>第一章</h1></body></html>"
   };
   const workspace = await manager.create("run-11111111-1111-1111-1111-111111111111", input);
+  assert.deepEqual(await readdir(path.join(workspace, ".agents/skills")), ["plan-creator-video"]);
+  assert.deepEqual(await readdir(path.join(workspace, "schemas")), ["video-scene-plan.schema.json"]);
   assert.match(await readFile(path.join(workspace, "input/accepted-presentation.html"), "utf8"), /第一章/);
   assert.deepEqual((await manager.readInput({ workspace, contentId: input.contentId, taskType: input.taskType, contentVersion: 1 })).acceptedHtml, input.acceptedHtml);
   const specification = createTaskSpecification(input, workspace, 1000);
   assert.equal(specification.schemaPath, path.join(workspace, "schemas/video-scene-plan.schema.json"));
   assert.equal(specification.outputPath, path.join(workspace, "output/video-scene-plan.json"));
   assert.match(specification.prompt, /不生成 React、HTML、图片或 MP4/);
+  assert.match(specification.prompt, /\$plan-creator-video/);
 
   const portraitSpecification = createTaskSpecification({ ...input, styleConfig: { ...input.styleConfig, aspectRatio: "9:16" } }, workspace, 1000);
   assert.match(portraitSpecification.prompt, /9:16（1080×1920）/);
