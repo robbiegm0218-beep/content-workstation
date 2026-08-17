@@ -13,6 +13,32 @@ const expectedSkills = [
   "produce-creator-visuals",
   "plan-creator-video",
 ];
+const expectedReferences = {
+  "create-creator-content": [
+    "interaction-modes.md",
+    "content-quality.md",
+    "publishing-platforms.md",
+    "capability-fallbacks.md",
+  ],
+  "produce-creator-visuals": [
+    "visual-inputs-and-modes.md",
+    "html-production.md",
+    "cover-production.md",
+    "capability-fallbacks.md",
+  ],
+  "plan-creator-video": [
+    "video-inputs-and-modes.md",
+    "scene-plan-contract.md",
+    "capability-fallbacks.md",
+  ],
+};
+const publicPluginForbiddenPatterns = [
+  [/CW-SKILL-1\.0/u, "internal skill evidence"],
+  [/content-workstation-creator/u, "legacy repository skill name"],
+  [/\.agents\/skills/u, "repository skill path"],
+  [/\/Users\//u, "local absolute path"],
+  [/sk-[A-Za-z0-9_-]{12,}/u, "possible API key"],
+];
 
 async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, "utf8"));
@@ -50,6 +76,14 @@ async function validateSkills() {
     if (!skillText.startsWith("---\n")) throw new Error(`${skillName} has no YAML frontmatter`);
     if (!skillText.includes(`name: ${skillName}`)) throw new Error(`${skillName} frontmatter name mismatch`);
     if (!metadataText.includes(`$${skillName}`)) throw new Error(`${skillName} default prompt must mention the skill`);
+
+    for (const referenceName of expectedReferences[skillName]) {
+      const referencePath = path.join(skillRoot, "references", referenceName);
+      await assertFile(referencePath, `${skillName} reference ${referenceName}`);
+      if (!skillText.includes(`references/${referenceName}`)) {
+        throw new Error(`${skillName} does not route to references/${referenceName}`);
+      }
+    }
   }
 
   const textFiles = (await listFiles(pluginRoot)).filter((file) => /\.(?:md|json|yaml|yml|svg)$/u.test(file));
@@ -58,8 +92,10 @@ async function validateSkills() {
     if (/\[TODO:|\bTODO\b/u.test(text)) {
       throw new Error(`Unresolved TODO found in ${path.relative(repoRoot, filePath)}`);
     }
-    if (/\/Users\/|sk-[A-Za-z0-9_-]{12,}/u.test(text)) {
-      throw new Error(`Private path or possible key found in ${path.relative(repoRoot, filePath)}`);
+    for (const [pattern, label] of publicPluginForbiddenPatterns) {
+      if (pattern.test(text)) {
+        throw new Error(`${label} found in ${path.relative(repoRoot, filePath)}`);
+      }
     }
   }
 }
@@ -72,6 +108,13 @@ async function validatePlugin() {
   }
   if (manifest.skills !== "./skills/") throw new Error("Plugin skills path must be ./skills/");
   if (manifest.mcpServers || manifest.apps) throw new Error("V1 must remain a Skills-only plugin");
+  const defaultPrompts = manifest.interface?.defaultPrompt;
+  if (!Array.isArray(defaultPrompts) || defaultPrompts.length < 1 || defaultPrompts.length > 3) {
+    throw new Error("Plugin must provide between one and three starter prompts");
+  }
+  if (defaultPrompts.some((prompt) => typeof prompt !== "string" || prompt.length > 128)) {
+    throw new Error("Every plugin starter prompt must be a string no longer than 128 characters");
+  }
 
   for (const field of ["composerIcon", "logo"]) {
     const relativePath = manifest.interface?.[field];

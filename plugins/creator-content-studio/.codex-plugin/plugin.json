@@ -1,6 +1,6 @@
 {
   "name": "creator-content-studio",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260817060918",
   "description": "Turn creator profiles and topics into practical scripts, recording visuals, publishing copy, and editable video plans.",
   "author": {
     "name": "Content Workstation Contributors",
@@ -9,22 +9,30 @@
   "homepage": "https://github.com/robbiegm0218-beep/content-workstation",
   "repository": "https://github.com/robbiegm0218-beep/content-workstation",
   "license": "MIT",
-  "keywords": ["creator", "content", "script", "social-media", "video"],
+  "keywords": [
+    "creator",
+    "content",
+    "script",
+    "social-media",
+    "video"
+  ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "创作者内容生产",
-    "shortDescription": "把选题转化为可录制、可制作、可发布的内容",
-    "longDescription": "从账号定位、选题和真实案例出发，生成内容稿、录屏 HTML、封面方案、平台发布文案和可编辑视频场景计划。",
+    "displayName": "\u521b\u4f5c\u8005\u5185\u5bb9\u751f\u4ea7",
+    "shortDescription": "\u628a\u9009\u9898\u8f6c\u5316\u4e3a\u53ef\u5f55\u5236\u3001\u53ef\u5236\u4f5c\u3001\u53ef\u53d1\u5e03\u7684\u5185\u5bb9",
+    "longDescription": "\u4ece\u8d26\u53f7\u5b9a\u4f4d\u3001\u9009\u9898\u548c\u771f\u5b9e\u6848\u4f8b\u51fa\u53d1\uff0c\u751f\u6210\u5185\u5bb9\u7a3f\u3001\u5f55\u5c4f HTML\u3001\u5c01\u9762\u65b9\u6848\u3001\u5e73\u53f0\u53d1\u5e03\u6587\u6848\u548c\u53ef\u7f16\u8f91\u89c6\u9891\u573a\u666f\u8ba1\u5212\u3002",
     "developerName": "Content Workstation Contributors",
     "category": "Productivity",
-    "capabilities": ["Write"],
+    "capabilities": [
+      "Write"
+    ],
     "brandColor": "#1769FF",
     "composerIcon": "./assets/icon.svg",
     "logo": "./assets/logo.svg",
     "defaultPrompt": [
-      "把我的账号背景和选题整理成一条可录制的视频内容。",
-      "根据已确认内容制作 HTML 录屏页和三尺寸封面方案。",
-      "把已确认内容规划成可编辑的视频场景、字幕和素材清单。"
+      "\u628a\u6211\u7684\u8d26\u53f7\u80cc\u666f\u548c\u9009\u9898\u6574\u7406\u6210\u4e00\u6761\u53ef\u5f55\u5236\u7684\u89c6\u9891\u5185\u5bb9\u3002",
+      "\u6839\u636e\u5df2\u786e\u8ba4\u5185\u5bb9\u5236\u4f5c HTML \u5f55\u5c4f\u9875\u548c\u4e09\u5c3a\u5bf8\u5c01\u9762\u65b9\u6848\u3002",
+      "\u628a\u5df2\u786e\u8ba4\u5185\u5bb9\u89c4\u5212\u6210\u53ef\u7f16\u8f91\u7684\u89c6\u9891\u573a\u666f\u3001\u5b57\u5e55\u548c\u7d20\u6750\u6e05\u5355\u3002"
     ]
   }
 }

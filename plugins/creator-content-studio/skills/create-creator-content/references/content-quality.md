@@ -7,6 +7,17 @@
 - Ask for the minimum missing detail that would materially change the conclusion.
 - Never invent employers, customers, project scale, conversion, revenue, engagement, accuracy, or time saved.
 
+When the user mentions a personal case without enough detail, continue with a clearly generic scenario and list only the missing evidence needed to personalize it:
+
+- The user's role and decision responsibility
+- The situation or trigger
+- The options or disagreement
+- The judgment and action actually taken
+- The observable result and how it was measured
+- Which details may be disclosed publicly
+
+Do not transform the generic scenario into first-person experience until the user supplies those facts.
+
 ## Spoken delivery
 
 - Open with a recognizable work scene, mistake, disagreement, or decision conflict.
@@ -14,6 +25,7 @@
 - Explain technical concepts through decisions and consequences.
 - Use transitions that sound natural when spoken aloud.
 - End with one useful next action and at most one natural call to action.
+- Read the draft aloud mentally: remove headings, repeated conclusions, and definition-like sentences that do not sound like speech.
 
 ## Platform adaptation
 

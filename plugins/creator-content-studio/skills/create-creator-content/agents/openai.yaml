@@ -1,4 +1,4 @@
 interface:
   display_name: "创作者内容策划"
-  short_description: "把账号定位和选题转化为可录制、可修改、可发布的视频内容方案"
-  default_prompt: "使用 $create-creator-content，把我的账号背景和选题整理成可录制的视频内容。"
+  short_description: "从选题与真实经历生成口播稿、时间轴和已选平台发布包"
+  default_prompt: "使用 $create-creator-content，根据我的账号背景和一个选题生成可录制的视频内容；缺少案例细节时列出待补充问题。"

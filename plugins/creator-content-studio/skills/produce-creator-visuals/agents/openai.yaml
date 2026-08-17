@@ -1,4 +1,4 @@
 interface:
   display_name: "创作者视觉制作"
-  short_description: "从已确认内容制作录屏 HTML、三尺寸封面和可执行视觉方案"
-  default_prompt: "使用 $produce-creator-visuals，把已确认内容制作成 HTML 录屏页或三尺寸封面。"
+  short_description: "从已确认内容制作录屏 HTML、三尺寸封面和视觉降级方案"
+  default_prompt: "使用 $produce-creator-visuals，把这份已确认内容制作成录屏 HTML 或 16:9、4:3、3:4 三尺寸封面。"
