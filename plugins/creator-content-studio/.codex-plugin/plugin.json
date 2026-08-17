@@ -1,0 +1,30 @@
+{
+  "name": "creator-content-studio",
+  "version": "0.1.0",
+  "description": "Turn creator profiles and topics into practical scripts, recording visuals, publishing copy, and editable video plans.",
+  "author": {
+    "name": "Content Workstation Contributors",
+    "url": "https://github.com/robbiegm0218-beep/content-workstation"
+  },
+  "homepage": "https://github.com/robbiegm0218-beep/content-workstation",
+  "repository": "https://github.com/robbiegm0218-beep/content-workstation",
+  "license": "MIT",
+  "keywords": ["creator", "content", "script", "social-media", "video"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "创作者内容生产",
+    "shortDescription": "把选题转化为可录制、可制作、可发布的内容",
+    "longDescription": "从账号定位、选题和真实案例出发，生成内容稿、录屏 HTML、封面方案、平台发布文案和可编辑视频场景计划。",
+    "developerName": "Content Workstation Contributors",
+    "category": "Productivity",
+    "capabilities": ["Write"],
+    "brandColor": "#1769FF",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/logo.svg",
+    "defaultPrompt": [
+      "把我的账号背景和选题整理成一条可录制的视频内容。",
+      "根据已确认内容制作 HTML 录屏页和三尺寸封面方案。",
+      "把已确认内容规划成可编辑的视频场景、字幕和素材清单。"
+    ]
+  }
+}

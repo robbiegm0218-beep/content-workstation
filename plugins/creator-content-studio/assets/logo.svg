@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240" role="img" aria-labelledby="title desc">
+  <title id="title">创作者内容生产</title>
+  <desc id="desc">深蓝色内容卡片与绿色播放符号组成的插件标志</desc>
+  <rect width="640" height="240" rx="40" fill="#f5f8ff"/>
+  <rect x="36" y="36" width="168" height="168" rx="38" fill="#0d2638"/>
+  <path d="M72 79h96v17H72zm0 32h65v17H72zm0 32h45v17H72z" fill="#f5f8ff"/>
+  <path d="m144 125 35 21-35 21z" fill="#c8ff4d"/>
+  <g fill="#0d2638" font-family="system-ui, sans-serif">
+    <text x="238" y="112" font-size="46" font-weight="750">创作者内容生产</text>
+    <text x="240" y="158" font-size="24" font-weight="500" fill="#536675">从选题到可录制、可发布</text>
+  </g>
+</svg>

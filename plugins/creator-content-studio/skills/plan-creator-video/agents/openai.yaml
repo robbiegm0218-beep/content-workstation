@@ -1,0 +1,4 @@
+interface:
+  display_name: "创作者视频规划"
+  short_description: "把已确认内容或 HTML 转化为可编辑的视频场景方案"
+  default_prompt: "使用 $plan-creator-video，为已确认内容规划可编辑的视频场景、字幕和素材。"

@@ -18,6 +18,8 @@
     "test:codex:cover": "node scripts/smoke-codex-artifacts.mjs cover",
     "test:codex:cancel": "node scripts/smoke-codex-cancel.mjs",
     "test:bridge:codex": "node scripts/smoke-bridge-content.mjs",
+    "plugin:validate:skills": "node scripts/validate-content-plugin.mjs --skills-only",
+    "plugin:validate": "node scripts/validate-content-plugin.mjs",
     "smoke:codex": "node scripts/smoke-codex-local.mjs",
     "video:install": "npm --prefix video-renderer install",
     "video:browser": "npm --prefix video-renderer run browser:ensure",
