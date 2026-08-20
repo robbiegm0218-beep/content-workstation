@@ -116,12 +116,30 @@ async function validatePlugin() {
     throw new Error("Every plugin starter prompt must be a string no longer than 128 characters");
   }
 
-  for (const field of ["composerIcon", "logo"]) {
+  for (const field of ["composerIcon", "logo", "logoDark"]) {
     const relativePath = manifest.interface?.[field];
     if (!relativePath?.startsWith("./")) throw new Error(`interface.${field} must be a relative plugin path`);
     const assetPath = path.resolve(pluginRoot, relativePath);
     if (!assetPath.startsWith(`${pluginRoot}${path.sep}`)) throw new Error(`interface.${field} escapes the plugin root`);
     await assertFile(assetPath, `interface.${field}`);
+  }
+
+  for (const field of ["websiteURL", "privacyPolicyURL", "termsOfServiceURL"]) {
+    const value = manifest.interface?.[field];
+    if (typeof value !== "string" || !value.startsWith("https://")) {
+      throw new Error(`interface.${field} must be an absolute HTTPS URL`);
+    }
+  }
+
+  const screenshots = manifest.interface?.screenshots;
+  if (!Array.isArray(screenshots) || screenshots.length !== 3) {
+    throw new Error("Plugin must provide exactly three marketplace screenshots");
+  }
+  for (const relativePath of screenshots) {
+    if (!/^\.\/assets\/.+\.png$/u.test(relativePath)) throw new Error("Every marketplace screenshot must be a PNG under ./assets/");
+    const assetPath = path.resolve(pluginRoot, relativePath);
+    if (!assetPath.startsWith(`${pluginRoot}${path.sep}`)) throw new Error("Marketplace screenshot escapes the plugin root");
+    await assertFile(assetPath, "marketplace screenshot");
   }
 
   const marketplace = await readJson(marketplacePath);

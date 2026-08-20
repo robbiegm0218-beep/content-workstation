@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240" role="img" aria-labelledby="title desc">
+  <title id="title">创作者内容工作室</title>
+  <desc id="desc">深色背景下的内容卡片与绿色播放符号</desc>
+  <rect width="640" height="240" rx="40" fill="#081824"/>
+  <rect x="36" y="36" width="168" height="168" rx="38" fill="#17364c" stroke="#31546d" stroke-width="3"/>
+  <path d="M72 79h96v17H72zm0 32h65v17H72zm0 32h45v17H72z" fill="#f5f8ff"/>
+  <path d="m144 125 35 21-35 21z" fill="#c8ff4d"/>
+  <g font-family="system-ui, sans-serif">
+    <text x="238" y="112" font-size="42" font-weight="750" fill="#f5f8ff">创作者内容工作室</text>
+    <text x="240" y="158" font-size="24" font-weight="500" fill="#a8bac8">内容先确认，视觉再制作</text>
+  </g>
+</svg>
