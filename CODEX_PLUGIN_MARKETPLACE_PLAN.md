@@ -212,7 +212,9 @@ M3 验证记录（2026-08-17）：
 - 真实 HTML 任务通过：生成单文件 HTML，磁盘 manifest、根节点标记、远程资源限制和 SHA-256 校验通过。
 - 真实封面任务通过：使用 `codex-imagegen-hybrid` 生成 1600×900、1200×900、900×1200 三张独立 PNG，尺寸与 SHA-256 校验通过。
 - 真实 Bridge 内容生成和同线程续跑通过：两次运行使用同一 thread，适配层 evidence 为 `CW-BRIDGE-1.0`。
-- 发布包和视频方案通过路由、Schema、单平台约束、场景语义和 Bridge 固定测试；追加真实发布包调用因本机 Codex 当期额度上限未启动，未将其伪装为真实调用成功。
+- 发布包和视频方案通过路由、Schema、单平台约束、场景语义和 Bridge 固定测试。
+- 2026-08-20 补跑真实 Codex 发布包任务通过：仅为已选 B站生成 `publishing-package.md`，Manifest、SHA-256 和 `CW-BRIDGE-1.0` evidence 校验通过。
+- 2026-08-20 补跑真实 Codex 视频方案任务通过：通过 `plan-creator-video` 路由生成 `video-scene-plan.json`，场景 Schema、连续帧时长、Manifest 与 SHA-256 校验通过。
 - Doctor 可区分插件源码与 Codex 安装状态；README 和首次使用向导给出终端、浏览器和设置页的明确操作位置。
 
 ### M4：测试与质量闸门
