@@ -1,0 +1,20 @@
+[
+  {
+    "id": "react-debugging",
+    "prompt": "修复这个 React 页面的 hydration 报错，并补上单元测试。",
+    "expectedSkill": null,
+    "reason": "这是软件开发任务，不是自媒体内容生产。"
+  },
+  {
+    "id": "uploaded-video-editing",
+    "prompt": "把这段 MP4 去掉停顿、调色并导出成片。",
+    "expectedSkill": null,
+    "reason": "这是视频剪辑与渲染任务，不是视频场景策划。"
+  },
+  {
+    "id": "content-library-software",
+    "prompt": "给内容工作站增加用户登录、权限和云数据库。",
+    "expectedSkill": null,
+    "reason": "这是内容管理软件开发，不是内容稿生成。"
+  }
+]

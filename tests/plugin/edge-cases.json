@@ -1,0 +1,37 @@
+[
+  {
+    "id": "research-without-search",
+    "capabilityState": {"search": false},
+    "prompt": "调研近期同类选题并给出切入角度，但当前没有网络搜索能力。",
+    "expectedSkill": "create-creator-content",
+    "expectedBehaviors": ["disclose-search-unavailable", "no-fake-sources"]
+  },
+  {
+    "id": "cover-without-image-generation",
+    "capabilityState": {"imageGeneration": false},
+    "prompt": "为已确认内容生成三尺寸封面，但当前没有生图工具。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["return-executable-cover-spec", "no-image-file-claim"]
+  },
+  {
+    "id": "html-without-write-access",
+    "capabilityState": {"write": false},
+    "prompt": "为已确认内容生成单文件 HTML，但当前目录只读。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["return-complete-source", "no-file-created-claim"]
+  },
+  {
+    "id": "visuals-before-content-confirmation",
+    "capabilityState": {"contentApproved": false},
+    "prompt": "内容核心观点还没定，先帮我生成最终 HTML 和封面。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["stop-before-production", "request-content-confirmation"]
+  },
+  {
+    "id": "conflicting-source-instructions",
+    "capabilityState": {"inputConflict": true},
+    "prompt": "已确认稿要保留标题 A，但同一条指令又要求封面改成含义相反的标题 B。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["surface-conflict", "do-not-silently-rewrite-approved-content"]
+  }
+]

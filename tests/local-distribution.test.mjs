@@ -38,7 +38,9 @@ test("CI uses Fake Runner tests and real Codex smoke tests require explicit conf
   ]);
 
   assert.equal(packageJson.scripts["test:ci"], "npm run check:privacy && npm run lint && npm test");
-  assert.equal(packageJson.scripts.test, "npm run build && node --test tests/*.test.mjs tests/bridge/*.test.mjs");
+  assert.equal(packageJson.scripts.test, "npm run build && node --test tests/*.test.mjs tests/bridge/*.test.mjs tests/plugin/*.test.mjs");
+  assert.equal(packageJson.scripts["test:plugin"], "node --test tests/plugin/*.test.mjs");
+  assert.equal(packageJson.scripts["test:plugin:codex"], "node scripts/smoke-codex-plugin.mjs");
   assert.equal(packageJson.scripts["smoke:codex"], "node scripts/smoke-codex-local.mjs");
   assert.match(workflow, /npm run test:ci/);
   assert.match(workflow, /actions\/checkout@v7/);
@@ -53,6 +55,13 @@ test("CI uses Fake Runner tests and real Codex smoke tests require explicit conf
   const unconfirmed = spawnSync(process.execPath, ["scripts/smoke-codex-local.mjs", "content"], { cwd: projectRoot, encoding: "utf8" });
   assert.equal(unconfirmed.status, 2);
   assert.match(unconfirmed.stderr, /尚未执行/);
+
+  const pluginHelp = spawnSync(process.execPath, ["scripts/smoke-codex-plugin.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(pluginHelp.status, 0);
+  assert.match(pluginHelp.stdout, /必须显式添加 --yes/);
+  const pluginUnconfirmed = spawnSync(process.execPath, ["scripts/smoke-codex-plugin.mjs", "content"], { cwd: projectRoot, encoding: "utf8" });
+  assert.equal(pluginUnconfirmed.status, 2);
+  assert.match(pluginUnconfirmed.stderr, /尚未执行/);
 
   const videoHelp = spawnSync(process.execPath, ["scripts/smoke-video-render.mjs", "--help"], { cwd: projectRoot, encoding: "utf8" });
   assert.equal(videoHelp.status, 0);

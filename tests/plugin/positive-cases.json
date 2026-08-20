@@ -1,0 +1,44 @@
+[
+  {
+    "id": "content-draft-from-profile-and-topic",
+    "capability": "content-draft",
+    "prompt": "我是一名企业服务产品经理，想给正在转型 AI 产品的人讲清楚知识库项目中的评测判断，请生成 5～8 分钟口播稿。",
+    "expectedSkill": "create-creator-content",
+    "expectedBehaviors": ["spoken-first", "scene-to-action", "duration-aware"]
+  },
+  {
+    "id": "missing-case-details",
+    "capability": "missing-case-questions",
+    "prompt": "我有一次 RAG 项目踩坑经历，但暂时没有提供项目背景、客户和指标，请先整理内容框架。",
+    "expectedSkill": "create-creator-content",
+    "expectedBehaviors": ["missing-case-questions", "no-fabrication"]
+  },
+  {
+    "id": "approved-content-to-html",
+    "capability": "self-contained-html",
+    "prompt": "下面的内容稿已经确认，请按原有章节顺序制作一个可录屏的单文件 HTML 页面。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["approved-source-only", "self-contained-html", "preserve-order"]
+  },
+  {
+    "id": "cover-without-image-tool",
+    "capability": "three-size-cover-fallback",
+    "prompt": "内容已确认，请制作 16:9、4:3、3:4 三尺寸封面；如果当前不能生图，请返回可执行的三尺寸构图方案。",
+    "expectedSkill": "produce-creator-visuals",
+    "expectedBehaviors": ["three-independent-compositions", "honest-image-fallback"]
+  },
+  {
+    "id": "bilibili-only-publishing",
+    "capability": "selected-platform-publishing",
+    "prompt": "内容已定稿，这次只发 B站，请生成 B站标题、简介、分章和标签，不要生成其他平台文案。",
+    "expectedSkill": "create-creator-content",
+    "expectedBehaviors": ["selected-platform-only"]
+  },
+  {
+    "id": "approved-content-to-video-plan",
+    "capability": "editable-video-plan",
+    "prompt": "内容已确认，请按 16:9、30 秒规划可编辑的场景、旁白、字幕、转场和缺失素材，不渲染 MP4。",
+    "expectedSkill": "plan-creator-video",
+    "expectedBehaviors": ["editable-scene-plan", "declared-materials-only", "no-render-claim"]
+  }
+]
