@@ -9,12 +9,13 @@
 - [x] 三个 Skills 和一个负向请求的真实 Codex 隔离测试。
 - [x] 隐私政策、服务条款、支持页源文件。
 - [x] GitHub 仓库为公开仓库，默认分支为 `main`，Issues 已开启。
+- [x] 插件分支已推送，并以该分支的 `/docs` 作为 GitHub Pages 发布源，无需提前合并 `main`。
+- [x] website、support、privacy 和 terms 四个 HTTPS 地址均返回 200，页面内容已核对。
 
 ## 需账号所有者完成
 
-- [ ] 将 M5 变更合并到用于 GitHub Pages 的公开分支。
-- [ ] 在 GitHub 仓库设置中启用 Pages，发布 `/docs` 目录。
-- [ ] 逐一打开 website、support、privacy 和 terms 的 HTTPS 地址。
 - [x] 确认 GitHub Issues 允许用户提交支持请求。
 - [ ] 在 OpenAI/Codex 开发者设置中完成身份、组织和发布权限检查。
 - [ ] 在提交表单中填写实际可用地区、联系方式和支持承诺。
+
+> 当前 Codex CLI 仅提供插件安装、列出、市场源管理和移除命令，没有公共市场发布或提交命令。官方开发者文档也未检索到公开的 Codex 插件市场提交入口，因此最后两项需以账号实际可见的开发者页面或官方邀请流程为准。
